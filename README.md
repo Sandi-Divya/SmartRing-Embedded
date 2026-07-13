@@ -39,16 +39,9 @@ The main goals of this project are:
 
 ## Phase 1: BLE Device Discovery
 
+<img width="681" height="144" alt="detecting Ring" src="https://github.com/user-attachments/assets/87d5e9dd-ef40-4e27-ab1c-6b0fc0fc4d27" />
+
 The SR08 ring was successfully detected through BLE scanning.
-
-Device discovered:
-
-```
-Name: SR08
-
-MAC Address:
-02:02:E3:FB:D6:C4
-```
 
 ---
 
@@ -56,33 +49,26 @@ MAC Address:
 
 The BLE GATT server of the ring was successfully accessed.
 
+<img width="449" height="636" alt="image" src="https://github.com/user-attachments/assets/27d26828-d763-4cd9-8c6d-a30a93405645" />
+
+
+<img width="449" height="446" alt="image" src="https://github.com/user-attachments/assets/787490a1-9165-4a59-be7a-ffccae7bef6b" />
+
 Discovered vendor-specific services:
 
-```
-Service:
-000056ff-0000-1000-8000-00805f9b34fb
-```
+***Service: 000056ff-0000-1000-8000-00805f9b34fb***
 
 Communication characteristics:
 
 ### Write Characteristic
 
-```
-000033f3-0000-1000-8000-00805f9b34fb
-```
-
-Purpose:
+***000033f3-0000-1000-8000-00805f9b34fb***
 
 - Sending custom commands to the ring
 
-
 ### Notification Characteristic
 
-```
-000033f4-0000-1000-8000-00805f9b34fb
-```
-
-Purpose:
+***000033f4-0000-1000-8000-00805f9b34fb***
 
 - Receiving raw data packets from the ring
 
@@ -90,36 +76,8 @@ Purpose:
 
 # Framework Architecture
 
-```
-SR08 Ring
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/03eed5ac-06b8-486c-a54e-3c73fe059a73" />
 
-     |
-     |
-     | BLE GATT Communication
-     |
-     v
-
-Python Framework
-
-     |
-     |
- +-----------+
- |Connection |
- +-----------+
-
-     |
- +-----------+
- | Notify    |
- | Handler   |
- +-----------+
-
-     |
- +-----------+
- | Command  |
- | Writer   |
- +-----------+
-
-```
 
 ---
 
@@ -140,11 +98,8 @@ The framework can:
 
 A vendor handshake command was discovered.
 
-Command transmitted:
+Command transmitted:  ***5A***
 
-```
-5A
-```
 
 Communication channel:
 
@@ -166,69 +121,14 @@ Response captured:
 
 This confirmed successful two-way communication with the SR08 ring without using the official application.
 
----
-
 # Packet Capture Example
 
-Notification example:
+<img width="1083" height="955" alt="image" src="https://github.com/user-attachments/assets/20760229-58cf-404a-aaf3-759fbada6def" />
 
-```
-===== NOTIFICATION =====
-
-Sender:
-000033f4-0000-1000-8000-00805f9b34fb
-
-
-Data:
-
-5A 07 38 83 60 00 FF FF FF FF
-01 0A 08 00 06 00 50 00 00 00
-
-```
+<img width="782" height="381" alt="image" src="https://github.com/user-attachments/assets/0b18da9b-1e20-43f7-805b-5e4a4a50c322" />
 
 ---
 
-# Project Screenshots
-
-## BLE Device Detection
-
-(Add screenshot here)
-
-```
-![BLE Detection](screenshots/device_detection.png)
-```
-
----
-
-## GATT Service Discovery
-
-(Add screenshot here)
-
-```
-![GATT Services](screenshots/gatt_services.png)
-```
-
----
-
-## Notification Subscription
-
-(Add screenshot here)
-
-```
-![Notification](screenshots/notification.png)
-```
-
----
-
-## Custom Handshake Response
-
-(Add screenshot here)
-
-```
-![Handshake](screenshots/handshake.png)
-```
-
----
 
 # Future Work
 
