@@ -5,7 +5,6 @@ from ble.notify import subscribe_notifications
 from ble.writer import send_command
 
 
-
 async def main():
 
     print("==============================")
