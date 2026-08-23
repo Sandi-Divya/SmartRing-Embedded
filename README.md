@@ -87,3 +87,39 @@ Due to the closed nature of the original firmware and vendor application, the pr
            │
            ▼
 [ Port 2 GPIO Pins (P2_0 - P2_7) ] ──▶ [ Physical 7-Segment LED Display ]
+```
+
+### Week 8: Hardware Subsystem Integration & Power Telemetry
+
+* **Capacitive Touch Emulation & Gesture Engine:**
+  * Configured the hardware Wake-Up Controller (`WKUPCT`) on pin `P1_3` with a 40ms debounce window for active-LOW edge triggering.
+  * Implemented a multi-tap gesture detection state machine:
+    * **Single Tap:** Evaluated via a 350ms non-blocking window timer to increment and display a local counter (`0`–`9`).
+    * **Double Tap:** Triggers real-time power telemetry and displays the current battery level tens digit.
+  * Added an automated 2-second timeout callback to shut off display segments post-interaction for energy conservation.
+
+* **Internal Power Rail Telemetry:**
+  * Integrated the DA14585 General Purpose ADC (`GP_ADC`) to monitor the internal supply rail (`VBAT3V`) using `adc_get_vbat_sample`.
+  * Implemented a calibrated voltage-to-percentage mapping transfer function ($0\%$ at $\approx 2.6\text{V}$, $100\%$ at $\approx 3.3\text{V}$).
+  * Configured background periodic sampling every 5 seconds to maintain current battery telemetry.
+
+* **Hardware Mapping & Pin Configuration:**
+  * `P1_0`: Output – Diagnostic LED pulse.
+  * `P1_3`: Input Pull-Up – Wake-Up Controller / Touch interrupt.
+  * `P0_0`–`P0_7`: Output – 7-segment display matrix bus.
+
+## Project Structure
+
+```text
+├── src/
+│   ├── platform/
+│   │   └── user_periph_setup.c   # Pin reservations, pad modes, and peripheral clocks
+│   ├── user_app/
+│   │   ├── user_peripheral.c     # Main application state machine, ADC, WKUPCT, BLE handlers
+│   │   ├── user_peripheral.h     # Application prototypes and data structures
+│   │   ├── display.c             # 7-segment display lookup and GPIO driving logic
+│   │   └── display.h             # Display driver interface
+└── Keil_5/
+    └── ble_app_peripheral.uvprojx # Keil uVision project workspace
+
+
