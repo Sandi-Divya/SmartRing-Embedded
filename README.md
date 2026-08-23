@@ -1,193 +1,89 @@
-# SmartRing-Embedded
-# SR08 BLE Ring Reverse Engineering Framework
+# SmartRing-Embedded: SR08 BLE Ring Reverse Engineering & Hardware Replication
 
 ## Project Overview
 
-This project focuses on reverse engineering the proprietary Bluetooth Low Energy (BLE) communication protocol of the SR08 Smart Ring.
+This project focuses on reverse engineering the proprietary Bluetooth Low Energy (BLE) communication protocol and internal hardware architecture of the closed-source **SR08 Smart Ring**. 
 
-The objective is to analyze the ring's BLE communication without depending on the official vendor application and develop a custom Python-based framework to communicate directly with the device.
-
-The framework uses BLE GATT analysis, packet capture, and custom command transmission to understand and control the communication between the smartphone host and the SR08 ring.
-
----
-
-# Project Objectives
-
-The main goals of this project are:
-
-- Discover and analyze the SR08 BLE GATT structure.
-- Identify vendor-specific BLE services and characteristics.
-- Capture raw BLE notification packets.
-- Reverse engineer communication commands.
-- Develop a custom BLE communication framework.
-- Build a foundation for future features such as display control, gesture recognition, and independent ring control.
+Due to the closed nature of the original firmware and vendor application, the project follows a two-tier reverse engineering methodology:
+1. **Protocol Analysis:** Intercepting, analyzing, and recreating the proprietary BLE GATT service layer using Python (`Bleak`) and GATT sniffers.
+2. **Hardware Disassembly & Silicon Identification:** Teardown of the physical ring to identify the onboard System-on-Chip (SoC) and discrete peripheral components.
+3. **Hardware Replication & Embedded Firmware Implementation:** Recreating the ring's subsystem on the identical target SoC development board (Dialog/Renesas DA14585 Cortex-M0) to build custom firmware that drives peripheral displays via direct BLE commands.
 
 ---
 
-# Technologies Used
+## Technical Stack
 
-| Technology | Purpose |
-|---|---|
-| Python | Framework development |
-| Bleak | Bluetooth Low Energy communication |
-| nRF Connect | BLE GATT analysis |
-| Git | Version control |
-
----
-
-# Current Progress
-
-## Phase 1: BLE Device Discovery
-
-<img width="681" height="144" alt="detecting Ring" src="https://github.com/user-attachments/assets/87d5e9dd-ef40-4e27-ab1c-6b0fc0fc4d27" />
-
-The SR08 ring was successfully detected through BLE scanning.
+| Domain | Technology / Hardware | Purpose |
+|---|---|---|
+| **Host Framework** | Python 3, `Bleak` | Custom BLE client & automated packet injection |
+| **Firmware Development** | C (C99), Keil MDK-ARM (ARM Compiler 6) | Bare-metal SDK 6 firmware implementation |
+| **Target Silicon / SoC** | Renesas / Dialog DA14585 (ARM Cortex-M0) | Exact target microcontroller found in hardware teardown |
+| **Development Kit** | DA14585 Pro/Basic Dev Kit | Hardware emulation and logic debugging |
+| **Display Hardware** | Common-Anode 7-Segment LED display | Low-level display subsystem replication |
+| **Analysis Tools** | nRF Connect, Wireshark, J-Link Debugger | Packet inspection, GATT discovery, SWD tracing |
 
 ---
 
-## Phase 2: GATT Service Analysis
+## Weekly Engineering Progress
 
-The BLE GATT server of the ring was successfully accessed.
-
-<img width="449" height="636" alt="image" src="https://github.com/user-attachments/assets/27d26828-d763-4cd9-8c6d-a30a93405645" />
-
-
-<img width="449" height="446" alt="image" src="https://github.com/user-attachments/assets/787490a1-9165-4a59-be7a-ffccae7bef6b" />
-
-Discovered vendor-specific services:
-
-***Service: 000056ff-0000-1000-8000-00805f9b34fb***
-
-Communication characteristics:
-
-### Write Characteristic
-
-***000033f3-0000-1000-8000-00805f9b34fb***
-
-- Sending custom commands to the ring
-
-### Notification Characteristic
-
-***000033f4-0000-1000-8000-00805f9b34fb***
-
-- Receiving raw data packets from the ring
+### Protocol Discovery & GATT Reverse Engineering
+* Scanned and established connection with the closed-source SR08 Smart Ring without vendor mobile app dependencies.
+* Discovered proprietary vendor service UUID:
+  * **Primary Service:** `000056ff-0000-1000-8000-00805f9b34fb`
+  * **Write Characteristic:** `000033f3-0000-1000-8000-00805f9b34fb` (Custom command transmission)
+  * **Notify Characteristic:** `000033f4-0000-1000-8000-00805f9b34fb` (Telemetry & ACK feedback)
+* Developed initial Python-based BLE framework (`Bleak`) to transmit test payloads.
+* Reverse engineered the proprietary **Vendor Handshake**:
+  * **Command Sent:** `0x5A`
+  * **Response Captured:** `5A 07 38 83 60 00 FF FF FF FF 01 0A 08 00 06 00 50 00 00 00`
 
 ---
 
-# Framework Architecture
-
-<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/03eed5ac-06b8-486c-a54e-3c73fe059a73" />
-
-
----
-
-# Phase 3: Custom BLE Communication
-
-A custom Python framework was created using Bleak.
-
-The framework can:
-
-- Connect directly to SR08.
-- Subscribe to BLE notifications.
-- Send custom hexadecimal commands.
-- Capture raw response packets.
+### Hardware Teardown & Silicon Identification
+* Disassembled the sealed physical SR08 Smart Ring casing to inspect internal circuitry.
+* Performed chip-level identification on the micro-PCB:
+  * Identified the main controller as the **Dialog / Renesas DA14585 BLE SoC** (Ultra-low power ARM Cortex-M0).
+  * Traced power lines, battery charging circuitry, and display segment routing lines.
+* Mapped out the hardware replication strategy: transition from pure black-box protocol sniffing to developing custom, open firmware directly on the DA14585 platform.
 
 ---
 
-# Handshake Reverse Engineering
-
-A vendor handshake command was discovered.
-
-Command transmitted:  ***5A***
-
-
-Communication channel:
-
-```
-WRITE:
-0x33F3
-
-
-NOTIFY:
-0x33F4
-```
-
-Response captured:
-
-```
-5A 07 38 83 60 00 FF FF FF FF
-01 0A 08 00 06 00 50 00 00 00
-```
-
-This confirmed successful two-way communication with the SR08 ring without using the official application.
-
-# Packet Capture Example
-
-<img width="1083" height="955" alt="image" src="https://github.com/user-attachments/assets/20760229-58cf-404a-aaf3-759fbada6def" />
-
-<img width="782" height="381" alt="image" src="https://github.com/user-attachments/assets/0b18da9b-1e20-43f7-805b-5e4a4a50c322" />
+### SDK Environment Setup & Custom GATT Architecture
+* Configured the **Dialog SDK 6 (6.0.24.1464)** environment within Keil uVision for DA14585 target targets.
+* Configured Custom Profile (`custs1`) GATT database definitions to emulate the ring's command and telemetry endpoints.
+* Implemented kernel message routing in `user_peripheral.c` to catch incoming `CUSTS1_VAL_WRITE_IND` events directly from the BLE stack.
 
 ---
 
-
-# Future Work
-
-## Protocol Decoder
-
-Develop an automatic packet decoder:
-
-```
-Raw BLE Packet
-
-        |
-
-        v
-
-Packet Parser
-
-        |
-
-        v
-
-Command Identification
-
-```
+### Midterm Evaluation Milestone: Full Hardware-Firmware Replication & Display Demo
+* Built the physical display replication circuit using a common-anode 7-segment display wired to DA14585 Port 2 GPIO pins (`P2_0`, `P2_1`, `P2_2`, `P2_3`, `P2_5`, `P2_6`, `P2_7`).
+* Resolved shared-line hardware conflicts and pull-up parasitic leakage on SPI Flash shared lines (`P2_4`/`P2_6`).
+* Created a dedicated low-level display driver (`display.c`) with a customized bit-level lookup table (LUT) for digits `0` through `9`.
+* Implemented non-blocking visual diagnostic timers (`app_easy_timer`) for active status indication.
+* **Demonstrated working end-to-end prototype:**
+  * Device advertises as an open peripheral.
+  * Central host (nRF Connect / Python Bleak) connects and writes numeric command bytes.
+  * DA14585 receives packets over BLE and drives the physical 7-segment display in real-time.
 
 ---
 
-## Display Control
+## System Architecture
 
-Investigate display-related BLE commands and implement:
-
-- Custom display messages
-- Number rendering
-- Device information display
-
----
-
-## Gesture-Based Control
-
-Explore IMU sensor communication to implement:
-
-- Gesture recognition
-- Custom ring interactions
-- Smartphone control commands
-
----
-
-# Current Achievement
-
-Successfully achieved:
-
-✅ BLE communication without vendor application  
-✅ GATT structure analysis  
-✅ Vendor-specific service discovery  
-✅ Custom command transmission  
-✅ Notification packet capture  
-✅ SR08 handshake reproduction  
-
----
-
-# Author
-
-Individual Embedded Systems Reverse Engineering Project
+```text
+[ Smartphone / Host App ]
+           │
+           │  (BLE Write: '0'-'9' or 0x00-0x09)
+           ▼
+[ DA14585 BLE Radio Stack ]
+           │
+           ▼
+[ user_catch_rest_hndl() / custs1 ]
+           │
+           ▼
+[ parse_and_display_val() ]
+           │
+           ▼
+[ display_show_digit() / Segment LUT ]
+           │
+           ▼
+[ Port 2 GPIO Pins (P2_0 - P2_7) ] ──▶ [ Physical 7-Segment LED Display ]
