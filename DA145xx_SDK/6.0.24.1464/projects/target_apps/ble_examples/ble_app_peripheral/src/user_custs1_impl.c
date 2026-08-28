@@ -1,199 +1,340 @@
+
 /**
  ****************************************************************************************
+ *
  * @file user_custs1_impl.c
- * @brief Custom Profile 1 (Custs1) GATT Handlers with Multi-Byte Dynamic String Display.
+ * @brief Custom Profile 1 GATT handlers.
+ *
+ * Battery:
+ *      Service 1
+ *      Characteristic: SVC1_IDX_ADC_VAL_1_VAL
+ *
+ *      Value format:
+ *          1 byte
+ *          0 - 100 (% battery)
+ *
+ ****************************************************************************************
+ */
+
+/*
+ * INCLUDE FILES
  ****************************************************************************************
  */
 
 #include <string.h>
 #include <stdint.h>
-#include <stdbool.h>
-#include <stdio.h>
 
+#include "rwip_config.h"
 #include "gpio.h"
-#include "app_api.h"
 #include "app.h"
+#include "app_api.h"
 #include "prf_utils.h"
+
 #include "custs1.h"
 #include "custs1_task.h"
+
 #include "user_custs1_def.h"
 #include "user_custs1_impl.h"
 #include "user_peripheral.h"
 #include "user_periph_setup.h"
-#include "display.h"
 
-ke_msg_id_t timer_used        __SECTION_ZERO("retention_mem_area0");
-uint16_t indication_counter   __SECTION_ZERO("retention_mem_area0");
-uint16_t non_db_val_counter   __SECTION_ZERO("retention_mem_area0");
-timer_hnd led_pulse_timer     __SECTION_ZERO("retention_mem_area0");
+/*
+ * EXTERNAL FUNCTIONS
+ ****************************************************************************************
+ *
+ * These functions are implemented in user_peripheral.c
+ *
+ */
 
-static void led_off_timer_cb(void)
-{
-    GPIO_SetInactive(GPIO_PORT_1, GPIO_PIN_0);
-    led_pulse_timer = EASY_TIMER_INVALID_TIMER;
-}
+extern uint8_t read_battery_level_percentage(void);
+extern void app_batt_send_telemetry_ntf(uint8_t batt_lvl);
+
+/*
+ * EXTERNAL VARIABLES
+ ****************************************************************************************
+ */
+
+extern uint8_t current_batt_lvl;
+
+
+/*
+ * PRIVATE HELPER FUNCTIONS
+ ****************************************************************************************
+ */
 
 /**
- * @brief Displays single digits, letters, or multi-letter strings centered on the OLED.
+ * @brief Process a BLE write to the custom profile.
+ *
+ * The application currently uses the Control Point characteristic
+ * as the main command characteristic.
+ *
+ * Supported battery commands:
+ *
+ *      'B'     -> show battery
+ *      'b'     -> show battery
+ *      0x01    -> show battery
+ *
  */
-static void handle_display_write(const uint8_t *val_ptr, uint16_t length)
+static void battery_command(void)
 {
-    // 1. Diagnostic LED Pulse on P1_0 (1 second)
-    GPIO_SetActive(GPIO_PORT_1, GPIO_PIN_0);
-    if (led_pulse_timer != EASY_TIMER_INVALID_TIMER)
-    {
-        app_easy_timer_cancel(led_pulse_timer);
-    }
-    led_pulse_timer = app_easy_timer(100, led_off_timer_cb);
+    /*
+     * Read the real battery level from DA14585 ADC.
+     */
+    current_batt_lvl = read_battery_level_percentage();
 
-    if (length == 0 || val_ptr == NULL) return;
-
-    char text_buf[21];
-    memset(text_buf, 0, sizeof(text_buf));
-
-    // Handle single binary byte (0x00 to 0x09)
-    if (length == 1 && val_ptr[0] <= 9)
-    {
-        text_buf[0] = '0' + val_ptr[0];
-        text_buf[1] = '\0';
-    }
-    else
-    {
-        uint16_t copy_len = (length > 20) ? 20 : length;
-        memcpy(text_buf, val_ptr, copy_len);
-        text_buf[copy_len] = '\0';
-    }
-
-    // 2. Clear screen
-    display_clear();
-
-    // 3. Compute dynamic centering offset (each character is 6px wide)
-    uint8_t str_len = (uint8_t)strlen(text_buf);
-    uint8_t total_px = (uint8_t)(str_len * 6);
-    uint8_t start_col = (total_px < 128) ? (uint8_t)((128 - total_px) / 2) : 0;
-
-    // 4. Render the string centered on Page 3
-    display_draw_string(3, start_col, text_buf);
+    /*
+     * Send the battery value through the battery characteristic.
+     *
+     * This updates:
+     *
+     *      SVC1_IDX_ADC_VAL_1_VAL
+     *
+     * and sends a BLE notification if the phone has enabled
+     * notifications for that characteristic.
+     */
+    app_batt_send_telemetry_ntf(current_batt_lvl);
 }
 
+
+/*
+ * SERVICE 1 WRITE HANDLERS
+ ****************************************************************************************
+ */
+
+/**
+ * @brief Handle writes to Service 1 Control Point.
+ *
+ * This function is intentionally kept simple.
+ */
 void user_svc1_ctrl_wr_ind_handler(ke_msg_id_t const msgid,
                                    struct custs1_val_write_ind const *param,
                                    ke_task_id_t const dest_id,
                                    ke_task_id_t const src_id)
 {
-    (void)msgid; (void)dest_id; (void)src_id;
-    handle_display_write(param->value, param->length);
+    uint8_t first_byte;
+
+    if (param == NULL)
+    {
+        return;
+    }
+
+    if (param->length == 0)
+    {
+        return;
+    }
+
+    first_byte = param->value[0];
+
+    /*
+     * Battery command.
+     */
+    if ((first_byte == 'B') ||
+        (first_byte == 'b') ||
+        (first_byte == 0x01))
+    {
+        battery_command();
+        return;
+    }
+
+    /*
+     * Other commands can be added here later.
+     */
 }
 
+
+/**
+ * @brief Handle writes to LED State characteristic.
+ *
+ * 0x01 / '1' -> LED ON
+ * 0x00 / '0' -> LED OFF
+ */
 void user_svc1_led_wr_ind_handler(ke_msg_id_t const msgid,
                                   struct custs1_val_write_ind const *param,
                                   ke_task_id_t const dest_id,
                                   ke_task_id_t const src_id)
 {
-    (void)msgid; (void)dest_id; (void)src_id;
-    handle_display_write(param->value, param->length);
-}
-
-void user_svc1_long_val_wr_ind_handler(ke_msg_id_t const msgid,
-                                       struct custs1_val_write_ind const *param,
-                                       const ke_task_id_t dest_id,
-                                       const ke_task_id_t src_id)
-{
-    (void)msgid; (void)dest_id; (void)src_id;
-    handle_display_write(param->value, param->length);
-}
-
-/**
- * @brief Responds to GATT size verification requests for Long Value writes.
- */
-void user_svc1_long_val_att_info_req_handler(ke_msg_id_t const msgid,
-                                             const struct custs1_att_info_req *param,
-                                             const ke_task_id_t dest_id,
-                                             const ke_task_id_t src_id)
-{
-    struct custs1_att_info_rsp *rsp = KE_MSG_ALLOC(CUSTS1_ATT_INFO_RSP,
-                                                   src_id,
-                                                   dest_id,
-                                                   custs1_att_info_rsp);
-
-    rsp->conidx  = app_env[param->conidx].conidx;
-    rsp->att_idx = param->att_idx;
-    rsp->length  = DEF_SVC1_LONG_VALUE_CHAR_LEN;
-    rsp->status  = ATT_ERR_NO_ERROR;
-
-    KE_MSG_SEND(rsp);
-}
-
-/**
- * @brief Responds to GATT size verification requests for Control Point & LED State writes.
- */
-void user_svc1_rest_att_info_req_handler(ke_msg_id_t const msgid,
-                                         const struct custs1_att_info_req *param,
-                                         const ke_task_id_t dest_id,
-                                         const ke_task_id_t src_id)
-{
-    struct custs1_att_info_rsp *rsp = KE_MSG_ALLOC(CUSTS1_ATT_INFO_RSP,
-                                                   src_id,
-                                                   dest_id,
-                                                   custs1_att_info_rsp);
-
-    rsp->conidx  = app_env[param->conidx].conidx;
-    rsp->att_idx = param->att_idx;
-    rsp->status  = ATT_ERR_NO_ERROR;
-
-    switch (param->att_idx)
+    if (param == NULL)
     {
-        case SVC1_IDX_CONTROL_POINT_VAL:
-            rsp->length = DEF_SVC1_CTRL_POINT_CHAR_LEN;
-            break;
-
-        case SVC1_IDX_LED_STATE_VAL:
-            rsp->length = DEF_SVC1_LED_STATE_CHAR_LEN;
-            break;
-
-        case SVC1_IDX_LONG_VALUE_VAL:
-            rsp->length = DEF_SVC1_LONG_VALUE_CHAR_LEN;
-            break;
-
-        default:
-            rsp->length = 0;
-            break;
+        return;
     }
 
+    if (param->length == 0)
+    {
+        return;
+    }
+
+    /*
+     * LED ON
+     */
+    if ((param->value[0] == 0x01) ||
+        (param->value[0] == '1'))
+    {
+        GPIO_SetActive(GPIO_LED_PORT, GPIO_LED_PIN);
+    }
+
+    /*
+     * LED OFF
+     */
+    else if ((param->value[0] == 0x00) ||
+             (param->value[0] == '0'))
+    {
+        GPIO_SetInactive(GPIO_LED_PORT, GPIO_LED_PIN);
+    }
+}
+
+
+/*
+ * SERVICE 1 ATTENTION / ATTRIBUTE INFO HANDLERS
+ ****************************************************************************************
+ */
+
+/**
+ * @brief Attribute information handler for the Long Value characteristic.
+ *
+ * This is required by the CUSTS1 framework when accessing the long-value
+ * characteristic.
+ */
+void user_svc1_long_val_att_info_req_handler(ke_msg_id_t const msgid,
+                                              struct custs1_att_info_req const *param,
+                                              ke_task_id_t const dest_id,
+                                              ke_task_id_t const src_id)
+{
+    struct custs1_att_info_rsp *rsp;
+
+    rsp = KE_MSG_ALLOC(CUSTS1_ATT_INFO_RSP,
+                       src_id,
+                       dest_id,
+                       custs1_att_info_rsp);
+
+    rsp->conidx  = param->conidx;
+    rsp->att_idx = param->att_idx;
+
+    /*
+     * Allow the configured long-value length.
+     */
+    rsp->length = DEF_SVC1_LONG_VALUE_CHAR_LEN;
+
+    /*
+     * No error.
+     */
+    rsp->status = ATT_ERR_NO_ERROR;
+
     KE_MSG_SEND(rsp);
 }
 
+
 /**
- * @brief Updates and notifies the telemetry/battery characteristic value to the connected peer.
- * @param[in] battery_level Battery percentage value (0-100)
+ * @brief Generic attribute information handler.
  */
-void user_update_telemetry_value(uint8_t battery_level)
+void user_svc1_rest_att_info_req_handler(ke_msg_id_t const msgid,
+                                          struct custs1_att_info_req const *param,
+                                          ke_task_id_t const dest_id,
+                                          ke_task_id_t const src_id)
 {
-    char telemetry_str[10];
-    sprintf(telemetry_str, "%d", battery_level);
-    uint8_t len = strlen(telemetry_str);
+    struct custs1_att_info_rsp *rsp;
 
-    struct custs1_val_ntf_ind_req *req = KE_MSG_ALLOC_DYN(CUSTS1_VAL_NTF_REQ,
-                                                          prf_get_task_from_id(TASK_ID_CUSTS1),
-                                                          TASK_APP,
-                                                          custs1_val_ntf_ind_req,
-                                                          len);
+    rsp = KE_MSG_ALLOC(CUSTS1_ATT_INFO_RSP,
+                       src_id,
+                       dest_id,
+                       custs1_att_info_rsp);
 
-    req->conidx = app_env[0].conidx;
-    req->notification = true;
-    req->handle = custs1_get_att_handle(SVC1_IDX_LONG_VALUE_VAL);
-    req->length = len;
-    memcpy(req->value, telemetry_str, len);
+    rsp->conidx  = param->conidx;
+    rsp->att_idx = param->att_idx;
 
-    KE_MSG_SEND(req);
+    /*
+     * Use the maximum attribute length from the database.
+     */
+    rsp->length = 0;
+
+    rsp->status = ATT_ERR_NO_ERROR;
+
+    KE_MSG_SEND(rsp);
 }
 
-void user_svc1_adc_val_1_cfg_ind_handler(ke_msg_id_t const msgid, struct custs1_val_write_ind const *param, const ke_task_id_t dest_id, const ke_task_id_t src_id) { (void)msgid; (void)dest_id; (void)src_id; (void)param; }
-void user_svc1_long_val_cfg_ind_handler(ke_msg_id_t const msgid, struct custs1_val_write_ind const *param, const ke_task_id_t dest_id, const ke_task_id_t src_id) { (void)msgid; (void)dest_id; (void)src_id; (void)param; }
-void user_svc1_long_val_ntf_cfm_handler(ke_msg_id_t const msgid, struct custs1_val_write_ind const *param, const ke_task_id_t dest_id, const ke_task_id_t src_id) { (void)msgid; (void)param; (void)dest_id; (void)src_id; }
-void user_svc1_adc_val_1_ntf_cfm_handler(ke_msg_id_t const msgid, struct custs1_val_write_ind const *param, const ke_task_id_t dest_id, const ke_task_id_t src_id) { (void)msgid; (void)param; (void)dest_id; (void)src_id; }
-void user_svc1_button_cfg_ind_handler(ke_msg_id_t const msgid, struct custs1_val_write_ind const *param, const ke_task_id_t dest_id, const ke_task_id_t src_id) { (void)msgid; (void)param; (void)dest_id; (void)src_id; }
-void user_svc1_button_ntf_cfm_handler(ke_msg_id_t const msgid, struct custs1_val_write_ind const *param, const ke_task_id_t dest_id, const ke_task_id_t src_id) { (void)msgid; (void)param; (void)dest_id; (void)src_id; }
-void user_svc1_indicateable_cfg_ind_handler(ke_msg_id_t const msgid, struct custs1_val_write_ind const *param, const ke_task_id_t dest_id, const ke_task_id_t src_id) { (void)msgid; (void)param; (void)dest_id; (void)src_id; }
-void user_svc1_indicateable_ind_cfm_handler(ke_msg_id_t const msgid, struct custs1_val_write_ind const *param, const ke_task_id_t dest_id, const ke_task_id_t src_id) { (void)msgid; (void)param; (void)dest_id; (void)src_id; }
-void user_svc3_read_non_db_val_handler(ke_msg_id_t const msgid, const struct custs1_value_req_ind *param, const ke_task_id_t dest_id, const ke_task_id_t src_id) { (void)msgid; (void)param; (void)dest_id; (void)src_id; }
+
+/*
+ * SERVICE 3 READ HANDLER
+ ****************************************************************************************
+ */
+
+/**
+ * @brief Dynamic read handler for Service 3 Read 4.
+ */
+void user_svc3_read_non_db_val_handler(ke_msg_id_t const msgid,
+                                       struct custs1_value_req_ind const *param,
+                                       ke_task_id_t const dest_id,
+                                       ke_task_id_t const src_id)
+{
+    struct custs1_value_req_rsp *rsp;
+
+    rsp = KE_MSG_ALLOC_DYN(CUSTS1_VALUE_REQ_RSP,
+                           src_id,
+                           dest_id,
+                           custs1_value_req_rsp,
+                           1);
+
+    rsp->conidx  = param->conidx;
+    rsp->att_idx = param->att_idx;
+
+    /*
+     * No dynamic value currently provided.
+     */
+    rsp->length = 0;
+    rsp->status = ATT_ERR_NO_ERROR;
+
+    KE_MSG_SEND(rsp);
+}
+
+
+/*
+ * OPTIONAL SERVICE HANDLERS
+ ****************************************************************************************
+ */
+
+/**
+ * @brief Handle Service 1 long-value writes.
+ *
+ * Currently we simply accept the write.
+ */
+void user_svc1_long_val_wr_ind_handler(ke_msg_id_t const msgid,
+                                       struct custs1_val_write_ind const *param,
+                                       ke_task_id_t const dest_id,
+                                       ke_task_id_t const src_id)
+{
+    if (param == NULL)
+    {
+        return;
+    }
+
+    /*
+     * Long-value processing can be added here later.
+     */
+}
+
+
+/*
+ * SERVICE 2 HANDLERS
+ ****************************************************************************************
+ */
+
+void user_svc2_write_1_wr_ind_handler(ke_msg_id_t const msgid,
+                                      struct custs1_val_write_ind const *param,
+                                      ke_task_id_t const dest_id,
+                                      ke_task_id_t const src_id)
+{
+    /*
+     * Reserved for Service 2 Write 1.
+     */
+}
+
+
+void user_svc2_write_2_wr_ind_handler(ke_msg_id_t const msgid,
+                                      struct custs1_val_write_ind const *param,
+                                      ke_task_id_t const dest_id,
+                                      ke_task_id_t const src_id)
+{
+    /*
+     * Reserved for Service 2 Write 2.
+     */
+}
+
