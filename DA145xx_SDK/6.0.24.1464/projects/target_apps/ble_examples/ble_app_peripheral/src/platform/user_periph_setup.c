@@ -25,6 +25,8 @@
 #define GPIO_LED_PIN    GPIO_PIN_0
 
 #if DEVELOPMENT_DEBUG
+
+//Explicitly reserves the hardware pins for the system before use
 void GPIO_reservations(void)
 {
 #if !defined (__DA14586__)

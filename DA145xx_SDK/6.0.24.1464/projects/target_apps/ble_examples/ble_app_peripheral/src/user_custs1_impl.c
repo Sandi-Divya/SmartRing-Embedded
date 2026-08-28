@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 #include "gpio.h"
 #include "app_api.h"
@@ -162,8 +163,33 @@ void user_svc1_rest_att_info_req_handler(ke_msg_id_t const msgid,
     KE_MSG_SEND(rsp);
 }
 
+/**
+ * @brief Updates and notifies the telemetry/battery characteristic value to the connected peer.
+ * @param[in] battery_level Battery percentage value (0-100)
+ */
+void user_update_telemetry_value(uint8_t battery_level)
+{
+    char telemetry_str[10];
+    sprintf(telemetry_str, "%d", battery_level);
+    uint8_t len = strlen(telemetry_str);
+
+    struct custs1_val_ntf_ind_req *req = KE_MSG_ALLOC_DYN(CUSTS1_VAL_NTF_REQ,
+                                                          prf_get_task_from_id(TASK_ID_CUSTS1),
+                                                          TASK_APP,
+                                                          custs1_val_ntf_ind_req,
+                                                          len);
+
+    req->conidx = app_env[0].conidx;
+    req->notification = true;
+    req->handle = custs1_get_att_handle(SVC1_IDX_LONG_VALUE_VAL);
+    req->length = len;
+    memcpy(req->value, telemetry_str, len);
+
+    KE_MSG_SEND(req);
+}
+
 void user_svc1_adc_val_1_cfg_ind_handler(ke_msg_id_t const msgid, struct custs1_val_write_ind const *param, const ke_task_id_t dest_id, const ke_task_id_t src_id) { (void)msgid; (void)dest_id; (void)src_id; (void)param; }
-void user_svc1_long_val_cfg_ind_handler(ke_msg_id_t const msgid, struct custs1_val_write_ind const *param, ke_task_id_t const dest_id, ke_task_id_t const src_id) { (void)msgid; (void)dest_id; (void)src_id; (void)param; }
+void user_svc1_long_val_cfg_ind_handler(ke_msg_id_t const msgid, struct custs1_val_write_ind const *param, const ke_task_id_t dest_id, const ke_task_id_t src_id) { (void)msgid; (void)dest_id; (void)src_id; (void)param; }
 void user_svc1_long_val_ntf_cfm_handler(ke_msg_id_t const msgid, struct custs1_val_write_ind const *param, const ke_task_id_t dest_id, const ke_task_id_t src_id) { (void)msgid; (void)param; (void)dest_id; (void)src_id; }
 void user_svc1_adc_val_1_ntf_cfm_handler(ke_msg_id_t const msgid, struct custs1_val_write_ind const *param, const ke_task_id_t dest_id, const ke_task_id_t src_id) { (void)msgid; (void)param; (void)dest_id; (void)src_id; }
 void user_svc1_button_cfg_ind_handler(ke_msg_id_t const msgid, struct custs1_val_write_ind const *param, const ke_task_id_t dest_id, const ke_task_id_t src_id) { (void)msgid; (void)param; (void)dest_id; (void)src_id; }

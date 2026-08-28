@@ -142,9 +142,9 @@ void user_svc1_long_val_wr_ind_handler(ke_msg_id_t const msgid,
  ****************************************************************************************
 */
 void user_svc1_adc_val_1_cfg_ind_handler(ke_msg_id_t const msgid,
-                                         struct custs1_val_write_ind const *param,
-                                         ke_task_id_t const dest_id,
-                                         ke_task_id_t const src_id);
+                                       struct custs1_val_write_ind const *param,
+                                       ke_task_id_t const dest_id,
+                                       ke_task_id_t const src_id);
 
 /**
  ****************************************************************************************
@@ -205,9 +205,17 @@ void app_adcval1_timer_cb_handler(void);
  ****************************************************************************************
  */
 void user_svc3_read_non_db_val_handler(ke_msg_id_t const msgid,
-                                           struct custs1_value_req_ind const *param,
-                                           ke_task_id_t const dest_id,
-                                           ke_task_id_t const src_id);
+                                       struct custs1_value_req_ind const *param,
+                                       ke_task_id_t const dest_id,
+                                       ke_task_id_t const src_id);
+
+/**
+ ****************************************************************************************
+ * @brief Updates and notifies the telemetry/battery characteristic value to the connected peer.
+ * @param[in] battery_level Battery percentage value (0-100)
+ ****************************************************************************************
+ */
+void user_update_telemetry_value(uint8_t battery_level);
 
 /// @} APP
 

@@ -1,4 +1,4 @@
-#<SYMDEFS># ARM Linker, 6240002: Last Updated: Thu Aug 27 14:31:40 2026
+#<SYMDEFS># ARM Linker, 6240002: Last Updated: Fri Aug 28 12:43:54 2026
 0x07f02001 T uECC_vli_add
 0x07f02019 T uECC_vli_sub
 0x07f02035 T uECC_vli_mult
