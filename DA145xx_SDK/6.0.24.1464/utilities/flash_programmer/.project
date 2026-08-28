@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<projectDescription>
+	<name>programmer</name>
+	<comment></comment>
+	<projects>
+	</projects>
+	<buildSpec>
+		<buildCommand>
+			<name>org.eclipse.cdt.managedbuilder.core.genmakebuilder</name>
+			<triggers>clean,full,incremental,</triggers>
+			<arguments>
+			</arguments>
+		</buildCommand>
+		<buildCommand>
+			<name>org.eclipse.cdt.managedbuilder.core.ScannerConfigBuilder</name>
+			<triggers>full,incremental,</triggers>
+			<arguments>
+			</arguments>
+		</buildCommand>
+	</buildSpec>
+	<natures>
+		<nature>org.eclipse.cdt.core.cnature</nature>
+		<nature>org.eclipse.cdt.managedbuilder.core.managedBuildNature</nature>
+		<nature>org.eclipse.cdt.managedbuilder.core.ScannerConfigNature</nature>
+	</natures>
+	<linkedResources>
+		<link>
+			<name>Include Files</name>
+			<type>2</type>
+			<locationURI>virtual:/virtual</locationURI>
+		</link>
+		<link>
+			<name>Source Files</name>
+			<type>2</type>
+			<locationURI>virtual:/virtual</locationURI>
+		</link>
+		<link>
+			<name>Startup Files</name>
+			<type>2</type>
+			<locationURI>virtual:/virtual</locationURI>
+		</link>
+		<link>
+			<name>Include Files/da1458x_config_basic.h</name>
+			<type>1</type>
+			<locationURI>$%7BPARENT-0-PROJECT_LOC%7D/include/da1458x_config_basic.h</locationURI>
+		</link>
+		<link>
+			<name>Include Files/gpio.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/driver/gpio/gpio.h</locationURI>
+		</link>
+		<link>
+			<name>Include Files/hw_otpc.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/driver/hw_otpc/hw_otpc.h</locationURI>
+		</link>
+		<link>
+			<name>Include Files/i2c_eeprom.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/driver/i2c_eeprom/i2c_eeprom.h</locationURI>
+		</link>
+		<link>
+			<name>Include Files/key_storage_defs.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/utilities/otp_key_storage/key_storage_defs.h</locationURI>
+		</link>
+		<link>
+			<name>Include Files/otp_utils.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/utilities/otp_utils/otp_utils.h</locationURI>
+		</link>
+		<link>
+			<name>Include Files/programmer.h</name>
+			<type>1</type>
+			<locationURI>$%7BPARENT-0-PROJECT_LOC%7D/include/programmer.h</locationURI>
+		</link>
+		<link>
+			<name>Include Files/spi.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/driver/spi/spi.h</locationURI>
+		</link>
+		<link>
+			<name>Include Files/spi_flash.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/driver/spi_flash/spi_flash.h</locationURI>
+		</link>
+		<link>
+			<name>Include Files/user_periph_setup.h</name>
+			<type>1</type>
+			<locationURI>$%7BPARENT-0-PROJECT_LOC%7D/include/user_periph_setup.h</locationURI>
+		</link>
+		<link>
+			<name>Include Files/version.h</name>
+			<type>1</type>
+			<locationURI>$%7BPARENT-0-PROJECT_LOC%7D/include/version.h</locationURI>
+		</link>
+		<link>
+			<name>Source Files/arch_system.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/arch/main/arch_system.c</locationURI>
+		</link>
+		<link>
+			<name>Source Files/crc32.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/third_party/crc32/crc32.c</locationURI>
+		</link>
+		<link>
+			<name>Source Files/dma.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/driver/dma/dma.c</locationURI>
+		</link>
+		<link>
+			<name>Source Files/gpio.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/driver/gpio/gpio.c</locationURI>
+		</link>
+		<link>
+			<name>Source Files/hw_otpc_531.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/driver/hw_otpc/hw_otpc_531.c</locationURI>
+		</link>
+		<link>
+			<name>Source Files/hw_otpc_58x.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/driver/hw_otpc/hw_otpc_58x.c</locationURI>
+		</link>
+		<link>
+			<name>Source Files/i2c.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/driver/i2c/i2c.c</locationURI>
+		</link>
+		<link>
+			<name>Source Files/i2c_eeprom.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/driver/i2c_eeprom/i2c_eeprom.c</locationURI>
+		</link>
+		<link>
+			<name>Source Files/otp_cs.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/utilities/otp_cs/otp_cs.c</locationURI>
+		</link>
+		<link>
+			<name>Source Files/otp_utils.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/utilities/otp_utils/otp_utils.c</locationURI>
+		</link>
+		<link>
+			<name>Source Files/peripherals.c</name>
+			<type>1</type>
+			<locationURI>$%7BPARENT-0-PROJECT_LOC%7D/src/peripherals.c</locationURI>
+		</link>
+		<link>
+			<name>Source Files/programmer.c</name>
+			<type>1</type>
+			<locationURI>$%7BPARENT-0-PROJECT_LOC%7D/src/programmer.c</locationURI>
+		</link>
+		<link>
+			<name>Source Files/spi_531.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/driver/spi/spi_531.c</locationURI>
+		</link>
+		<link>
+			<name>Source Files/spi_58x.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/driver/spi/spi_58x.c</locationURI>
+		</link>
+		<link>
+			<name>Source Files/spi_flash.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/driver/spi_flash/spi_flash.c</locationURI>
+		</link>
+		<link>
+			<name>Source Files/syscntl.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/driver/syscntl/syscntl.c</locationURI>
+		</link>
+		<link>
+			<name>Source Files/timer0.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/driver/timer/timer0.c</locationURI>
+		</link>
+		<link>
+			<name>Source Files/uart.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/driver/uart/uart.c</locationURI>
+		</link>
+		<link>
+			<name>Startup Files/hardfault_handler.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/arch/main/hardfault_handler.c</locationURI>
+		</link>
+		<link>
+			<name>Startup Files/nmi_handler.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/arch/main/nmi_handler.c</locationURI>
+		</link>
+		<link>
+			<name>Startup Files/startup_DA14531.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/arch/boot/startup_DA14531.c</locationURI>
+		</link>
+		<link>
+			<name>Startup Files/startup_DA14535.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/arch/boot/startup_DA14535.c</locationURI>
+		</link>
+		<link>
+			<name>Startup Files/startup_DA14585_586.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/arch/boot/startup_DA14585_586.c</locationURI>
+		</link>
+		<link>
+			<name>Startup Files/system_DA14531.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/arch/boot/system_DA14531.c</locationURI>
+		</link>
+		<link>
+			<name>Startup Files/system_DA14535.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/arch/boot/system_DA14535.c</locationURI>
+		</link>
+		<link>
+			<name>Startup Files/system_DA14585_586.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/sdk/platform/arch/boot/system_DA14585_586.c</locationURI>
+		</link>
+	</linkedResources>
+</projectDescription>

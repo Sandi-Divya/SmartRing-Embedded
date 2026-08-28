@@ -1,0 +1,16 @@
+int SetupTarget(void) 
+{
+      U16 v;
+      v = 0x0008;
+      JLINK_MEM_WriteU16(0x50003300, v);
+      v = 0x0001;
+      JLINK_MEM_WriteU16(0x50003102, v);
+      // WATCHDOG_REG
+      v = 0x0005;
+      JLINK_MEM_WriteU16(0x50003100, v);
+      JLINK_JTAG_Reset();
+      v = 0x00A2;
+      JLINK_MEM_WriteU16(0x50000012, v);
+      Report("Target setup done");
+      return 0;
+}

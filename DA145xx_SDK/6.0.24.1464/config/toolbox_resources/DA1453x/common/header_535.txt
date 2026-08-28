@@ -1,0 +1,13 @@
+Address	Size	Type	RW or RO	Shortname	Description	Group	Default	Number of options
+7F82ED0	240	String_Rev	RW	Configuration Script	<html>Configuration Script</html>	Configuration Script
+7F82FC0	4	Flag_rev	RW	Application Flag 1	<html>Application Programmed Flag #1 0x1234A5A5 = Application is in OTP</html>	Main group	0xFFFFFFFF	2	0xFFFFFFFF	No	0x1234A5A5	Yes
+7F82FC4	4	Flag_rev	RW	Application Flag 2	<html>Application Programmed Flag #2 0xA5A51234 = Application is in OTP</html>	Main group	0xFFFFFFFF	2	0xFFFFFFFF	No	0xA5A51234	Yes
+7F82FC8	4	Integer	RW	Boot specific config	<html>Boot specific configuration:<br>Bits[7:0] :<br>0xAA = Boot from SPI port at a specific location<br>0xFF = Normal sequence<br>Bits[15:8] = Wake up Command opcode<br>Bits[23:16]=SPI_DIV<br>Bits[31:24]:<br>0x00 = Two-wire UART (P0_0/P0_1)<br>0x01 = One-wire UART (P0_3)<br>0x02 = One-wire UART (P0_5)<br>0x03 = Two-wire UART (P0_1/P0_3)<br>Default (all other values) = Two-wire UART(P0_0/P0_1)<html/>	Main group
+7F82FCC	4	Integer	RW	Boot specific port mapping	<html>Boot specific port mapping:<br>Bits[7:4] = SPI_CLK, Port number<br>Bits[3:0] = SPI_CLK, Pin number<br>Bits[15:12] = SPI_EN, Port number<br>Bits[11:8] = SPI_EN, Pin number<br>Bits[23:20] = SPI_DO, Port number<br>Bits[19:16] = SPI_DO, Pin number<br>Bits[31:28] = SPI_DI, Port number<br>Bits[27:24] = SPI_DI, Pin number<html/>	Main group
+7F82FD0	4	Integer	RO	Device and Package Flag	<html>Device and Package Flag<br>Bits[7:0]: 0xAA = FCGQFN24<br>Bits[15:8]:<br>0x33 = 533<br>0x34 = 534<br>0x35 = 535<br>others = Reserved<br>Bits[31:16]: Reserved<br></html>	Main group
+7F82FD4	8	String	RW	Bluetooth Device Address	<html>Bluetooth Device Address (64-bit word). String of bytes</html>	Main group
+7F82FDC	4	Integer	RW	OTP DMA length	<html>OTP DMA length (number of 32-bit words)</html>	Main group
+7F82FE0	4	Integer	RO	Position	<html>Position:<br>Bits[7:0] = X coord<br>Bits[15:8] = Y coord<br>Bits[23:16 ]= Wafer #<br>Bits[31:24] = LOT #<html/>	Main group
+7F82FE4	4	Integer	RO	Tester	<html>Tester:<br>Bits[7:0] = Tester_Site<br>Bits[15:8] = Tester_ID (LSB)<br>Bits[23:16] = Tester_ID (MSB)<br>Bits[31:24] = Reserved<html/>	Main group
+7F82FE8	4	Integer	RO	TimeStamp	<html>TimeStamp:<br>Bits[7:0] = TS_Byte0<br>Bits[15:8] = TS_Byte1<br>Bits[23:16] = TS_Byte2<br>Bits[31:24] =TS_Byte3</html>	Main group
+7F82FEC	20	String	RW	Reserved for Future Needs	<html>Reserved for Future Needs</html>	Main group

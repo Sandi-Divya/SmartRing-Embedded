@@ -1,0 +1,60 @@
+#! armclang -E -I.\..\..\sdk\platform\include\ --target=arm-arm-none-eabi -mcpu=cortex-m0plus -xc
+
+#define __DA14535__
+#include "sdk_defs.h"
+
+LR_PRE_ECC_PATCH SDK_RAM_1_BASE_ADDR SDK_SEC_BL_ECC_PATCH_TABLE_OFFSET {
+    ER_PRE_ECC_PATCH SDK_RAM_1_BASE_ADDR SDK_SEC_BL_ECC_PATCH_TABLE_OFFSET {
+        *.o (RESET, +FIRST)
+    }
+}
+
+; 2 patch function slots for ECC
+LR_ECC_PATCH SDK_RAM_1_BASE_ADDR + SDK_SEC_BL_ECC_PATCH_TABLE_OFFSET SDK_SEC_BL_ECC_PATCH_TABLE_SIZE {
+    ER_ECC_PATCH SDK_RAM_1_BASE_ADDR + SDK_SEC_BL_ECC_PATCH_TABLE_OFFSET EMPTY SDK_SEC_BL_ECC_PATCH_TABLE_SIZE {
+    }
+}
+
+; The size of LR_1 defines the effective bootloader load image size
+LR_1 SDK_SEC_BOOTLOADER_BASE_LR_ADDRESS SDK_SEC_BOOTLOADER_LOAD_IMAGE_SIZE {
+    ER_1 +0 SDK_SEC_BOOTLOADER_COPY_BASE_ADDRESS {
+        *(InRoot$$Sections)
+        *(startup_code_DA14xxx)
+        *(system_DA14xxx)
+    }
+
+    ; ER_2 starts at the end of the load image area and ends at the start of the unitialized RAM area
+    ER_2 SDK_SEC_BOOTLOADER_ER_2_START_ADDRESS (SDK_RAM_UNINIT_START_ADDRESS - SDK_SEC_BOOTLOADER_ER_2_START_ADDRESS) {
+        .ANY(+RO)
+        .ANY(+RW, +ZI)
+    }
+
+    ; ER_OVERLAP section for overlapping unused data
+    ER_OVERLAP (SDK_RAM_1_BASE_ADDR + SDK_SEC_BOOTLOADER_COPY_BASE_ADDRESS) (SDK_SEC_BOOTLOADER_LOAD_IMAGE_SIZE - SDK_SEC_BOOTLOADER_COPY_BASE_ADDRESS) {
+        otp_cs.o (+RO)
+        hw_otpc_531.o (+RO)
+        *(otp_cs_booter)
+        arch_system.o (+RO)
+    }
+
+    ; Stack region growing down
+    ARM_LIB_STACK SDK_RAM_END_ADDR EMPTY -(SDK_RAM_END_ADDR - SDK_RAM_UNINIT_END_ADDRESS) {}
+
+; ***************************************************************************
+; Calculated values for DA14535 based on `sdk_defs.h` header file input.
+; SDK_RAM_UNINIT_START_ADDRESS    = 0x07FCF000
+; SDK_RAM_UNINIT_END_ADDRESS      = 0x07FCFA00
+; ***************************************************************************
+
+; ***************************************************************************
+; The RAM space from address 0x07FCF000 to 0x07FCFA00 must not be used by the
+; secondary bootloader and must remain uninitialized, in order to be used by
+; the TRNG software mechanism of the RAM downloaded application. The buffer
+; used by the TRNG software mechanism must be fed with random data in order
+; to generate true random seeds.
+; ***************************************************************************
+; The maximum size of the uninitialized RAM data, which can be fed to the
+; TRNG buffer, is 0xA00 since the DA14531 flash programmer (UART version)
+; leaves untouched the memory space from 0x07FCF000 to 0x07FCFA00.
+; ***************************************************************************
+}

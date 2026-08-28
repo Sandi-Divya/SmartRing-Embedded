@@ -1,0 +1,40 @@
+#<SYMDEFS># ARM Linker, 5060960: Last Updated: Thu Mar 31 16:35:59 2022
+; uECC ROM symbols
+0x07f1ec29 T uECC_verify
+0x07f1de21 T uECC_secp256r1
+0x07f02035 T uECC_vli_mult
+
+; rwip_schedule function symbol
+0x07f1d3fb T rwip_schedule
+
+; ARM library stuff
+0x07f233f3 T __aeabi_ldivmod
+0x07f2343f T __aeabi_llsr
+0x07f2343f T _ll_ushift_r
+0x07f23461 T __aeabi_uldivmod
+0x07f1f005 T __aeabi_uidiv
+0x07f1f005 T __aeabi_uidivmod
+0x07f1f031 T __aeabi_idiv
+0x07f1f031 T __aeabi_idivmod
+0x07f1f059 T __aeabi_lmul
+0x07f1f059 T _ll_mul
+0x07f1f0f9 T __aeabi_memcpy
+0x07f1f0f9 T __aeabi_memcpy4
+0x07f1f0f9 T __aeabi_memcpy8
+0x07f1f11d T __aeabi_memset
+0x07f1f11d T __aeabi_memset4
+0x07f1f11d T __aeabi_memset8
+0x07f1f12b T __aeabi_memclr
+0x07f1f12b T __aeabi_memclr4
+0x07f1f12b T __aeabi_memclr8
+0x07f1f12f T _memset$wrapper
+0x07f1f141 T memcmp
+0x07f1f15b T __aeabi_uread4
+0x07f1f15b T __rt_uread4
+0x07f1f15b T _uread4
+0x07f1f16f T __aeabi_uwrite4
+0x07f1f16f T __rt_uwrite4
+0x07f1f16f T _uwrite4
+0x07f1f181 T __aeabi_llsl
+0x07f1f181 T _ll_shift_l
+0x07f1f1a1 T __ARM_common_switch8

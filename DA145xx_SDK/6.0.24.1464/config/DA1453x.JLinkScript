@@ -1,0 +1,19 @@
+int SetupTarget(void) 
+{
+      
+      U32 v;
+      // JLINK_JTAG_Reset();
+      v = JLINK_MEM_ReadU32(0x50000012);
+      v &= 0xFFFC;
+      v |= 0x02;
+      JLINK_MEM_WriteU32(0x50000012, v);
+      JLINK_JTAG_Reset();
+      Report("Target setup done");
+      return 0;
+}
+
+int AfterResetTarget()
+{
+    Report("AfterResetTarget executed");
+    return 0;
+}

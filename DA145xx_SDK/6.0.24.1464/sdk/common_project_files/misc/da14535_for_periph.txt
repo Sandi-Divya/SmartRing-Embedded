@@ -1,0 +1,282 @@
+#<SYMDEFS># ARM Linker, 5060960: Last Updated: Tue Mar 07 15:00:03 2023
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; SDK6 symbols in DA14535AB ROM
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; system_DA14535.c (controlled by __EXCLUDE_ROM_SYSTEM_DA14535__)
+0x07f1ead9 T SystemInit_ROM
+
+; arch_console.c (controlled by __EXCLUDE_ROM_ARCH_CONSOLE__)
+0x07f1edcd T arch_printf_flush
+0x07f1ee85 T arch_vprintf
+0x07f1eee5 T arch_printf
+0x07f1eef9 T arch_puts
+0x07f1ef09 T arch_printf_process
+
+; nvds.c (controlled by __EXCLUDE_ROM_NVDS__)
+0x07f1efb5 T nvds_get_func
+0x07f1f091 T nvds_init_func
+0x07f1f095 T nvds_del_func
+0x07f1f099 T nvds_put_func
+
+; arch_system.c (controlled by __EXCLUDE_ROM_ARCH_SYSTEM__)
+0x07f1f09d T init_pwr_and_clk_ble_part_start_ROM
+0x07f1f0e9 T init_pwr_and_clk_ble_part_xtal32k_ROM
+0x07f1f129 T init_pwr_and_clk_ble_part_rcx_ROM
+0x07f1f161 T init_pwr_and_clk_ble_part_end_ROM
+0x07f1f195 T calc_rcx_freq_ROM
+0x07f1f1d1 T calc_rcx_freq_stas_ROM
+0x07f1f211 T check_sys_startup_period_ROM
+0x07f1f241 T set_xtal32m_trim_value_ROM
+
+; chacha20.c (controlled by __EXCLUDE_ROM_CHACHA20__)
+0x07f1f329 T csprng_seed
+0x07f1f359 T csprng_get_next_uint32
+
+; hash.c (controlled by __EXCLUDE_ROM_HASH__)
+0x07f1f401 T hash
+
+; otp_cs.c (controlled by __EXCLUDE_ROM_OTP_CS__)
+0x07f1f46d T otp_cs_store_ROM
+0x07f1f615 T otp_cs_unpack_pd_rad_enhanced_tx_pwr_ctrl_ROM
+0x07f1f66d T otp_cs_unpack_pd_adpll_enhanced_tx_pwr_ctrl_ROM
+0x07f1f6a9 T otp_cs_load_pd_rad_ROM
+0x07f1f711 T otp_cs_load_pd_adpll_ROM
+
+0x07f1f76d T arch_asm_delay_us
+
+; syscntl.c (controlled by __EXCLUDE_ROM_SYSCNTL__)
+0x07f1f78d T syscntl_use_lowest_amba_clocks
+0x07f1f7a3 T syscntl_use_highest_amba_clocks
+0x07f1f7b9 T syscntl_cfg_xtal32m_amp_reg
+0x07f1f7d1 T syscntl_por_vbat_high_cfg
+0x07f1f7f5 T syscntl_por_vbat_low_cfg
+0x07f1f81d T syscntl_dcdc_set_level
+0x07f1f845 T syscntl_dcdc_cfg
+0x07f1f865 T syscntl_dcdc_get_level
+
+; syscntl.c (controlled by __EXCLUDE_ROM_SYSCNTL__ and CFG_POWER_MODE_BYPASS)
+0x07f1f87d T syscntl_dcdc_turn_off_ROM
+0x07f1f8cd T syscntl_dcdc_turn_on_in_boost_ROM
+0x07f1f929 T syscntl_dcdc_turn_on_in_buck_ROM
+
+; gpio.c (controlled by __EXCLUDE_ROM_GPIO__)
+0x07f1f955 T GPIO_SetPinFunction_ROM
+0x07f1f965 T GPIO_GetPinFunction_ROM
+0x07f1f979 T GPIO_SetInactive_ROM
+0x07f1f989 T GPIO_SetActive_ROM
+0x07f1f999 T GPIO_ConfigurePin_ROM
+0x07f1f9bd T GPIO_ConfigurePinPower_ROM
+0x07f1f9d5 T GPIO_GetPinStatus_ROM
+0x07f1f9ed T GPIO_is_valid_da14531_qfn_ROM
+0x07f1f9f9 T GPIO_is_valid_da14531_wlscp_ROM
+0x07f1fa05 T GPIO_EnableIRQ_ROM
+0x07f1fafd T GPIO_GetIRQInputLevel
+0x07f1fb8d T GPIO_SetIRQInputLevel
+0x07f1fbb1 T GPIO_ResetIRQ
+0x07f1fbd5 T GPIO_EnablePorPin_ROM
+0x07f1fbf9 T GPIO_DisablePorPin
+0x07f1fc05 T GPIO_SetPorTime
+0x07f1fc15 T GPIO_GetPorTime
+
+; wkupct_quadec.c (controlled by __EXCLUDE_ROM_WKUPCT_QUADEC__)
+0x07f1fcc5 T wkupct_set_deb_unit_time
+0x07f1fce5 T wkupct_enable_irq_ROM
+0x07f1fd2d T wkupct2_enable_irq_ROM
+0x07f1fd75 T wkupct_disable_irq
+0x07f1fd91 T wkupct2_disable_irq
+0x07f1fdad T quad_decoder_init
+0x07f1fdf1 T quad_decoder_disable_irq
+0x07f1fe09 T quad_decoder_release
+0x07f1fe29 T quad_decoder_enable_irq
+0x07f1fe59 T quad_decoder_clear_irq
+
+; TRNG implementation in ROM
+0x07f1fea9 T trng_acquire
+0x07f1fed9 T trng_acquire_v2
+
+; spi_531.c (controlled by __EXCLUDE_ROM_SPI_531__)
+0x07f1ff05 T spi_slave_send
+0x07f1ff95 T spi_slave_receive
+0x07f20049 T spi_slave_transfer
+0x07f200e1 T spi_master_send
+0x07f20151 T spi_master_receive
+0x07f201e9 T spi_master_transfer
+0x07f202b1 T spi_set_speed
+0x07f20305 T spi_enable
+0x07f20329 T spi_disable
+0x07f2034d T spi_set_cp_mode
+0x07f20361 T spi_set_bitmode
+0x07f2038d T spi_initialize_ROM
+0x07f203f5 T spi_cs_high
+0x07f20411 T spi_access
+0x07f2047d T spi_get_incr
+0x07f20491 T spi_get_wsz
+
+; i2c_eeprom.c (controlled by __EXCLUDE_ROM_I2C_EEPROM__)
+0x07f20611 T i2c_eeprom_release
+0x07f20619 T i2c_write_last_byte
+
+; uart.c (controlled by __EXCLUDE_ROM_UART__)
+0x07f20629 T uart_enable
+0x07f2065d T uart_disable
+0x07f206c7 T uart_write_byte
+0x07f206d5 T uart_write_buffer
+0x07f206f3 T uart_wait_tx_finish
+0x07f206ff T uart_read_byte
+0x07f2070d T uart_read_buffer
+0x07f20729 T uart_enable_flow_control
+0x07f2074d T uart_disable_flow_control_ROM
+
+; i2c.c (controlled by __EXCLUDE_ROM_I2C__)
+0x07f207ad T i2c_setup_slave
+0x07f207dd T i2c_setup_master
+0x07f20825 T i2c_init
+0x07f208f1 T i2c_release
+0x07f20915 T i2c_master_transmit_buffer_sync
+0x07f2098d T i2c_master_receive_buffer_sync
+0x07f20a05 T i2c_slave_receive_buffer_sync
+0x07f20a2d T i2c_slave_transmit_buffer_sync
+
+; hw_otpc_531.c (controlled by __EXCLUDE_ROM_HW_OTPC_531__)
+0x07f20a89 T otpc_dcdc_cfg
+0x07f20b11 T hw_otpc_set_speed
+0x07f20b95 T hw_otpc_word_prog_and_verify
+0x07f20bd9 T hw_otpc_word_read
+0x07f20bf1 T hw_otpc_prog
+0x07f20c25 T hw_otpc_prog_and_verify
+0x07f20c5b T hw_otpc_read
+0x07f20c85 T hw_otpc_disable_ROM
+
+; hw_otpc_531.c (controlled by __EXCLUDE_ROM_HW_OTPC_531__ and CFG_POWER_MODE_BYPASS)
+0x07f20abd T hw_otpc_enter_mode_ROM
+0x07f20b2d T hw_otpc_init_ROM
+
+; adc_531.c (controlled by __EXCLUDE_ROM_ADC_531__)
+0x07f20d35 T adc_set_diff_input
+0x07f20d49 T adc_set_se_input
+0x07f20e79 T adc_enable
+0x07f20e89 T adc_init_ROM
+0x07f20ed5 T adc_reset
+0x07f20f01 T adc_disable
+0x07f20f11 T adc_start
+0x07f20f21 T adc_get_sample
+0x07f20f3d T adc_offset_calibrate_ROM
+0x07f21019 T adc_correct_sample_ROM
+0x07f21071 T adc_get_temp_ROM
+
+; rwble.c (controlled by __EXCLUDE_ROM_RWBLE__)
+0x07f2111d T BLE_WAKEUP_LP_Handler_ROM
+0x07f21171 T rwble_isr_ROM
+
+; rwip.c (controlled by __EXCLUDE_ROM_RWIP__)
+0x07f211a1 T rwip_sleep_part1_ROM
+0x07f2120d T rwip_sleep_part2_ROM
+0x07f21251 T rwip_sleep_part3_ROM
+
+; rf_531.c (controlled by __EXCLUDE_ROM_RF_531__)
+0x07f212a1 T dis_adpll_ROM
+0x07f212d1 T kdtc_cal_end_ROM
+0x07f2131d T dis_kdtc_cal
+0x07f2132d T en_hclk
+0x07f21339 T en_adpll_tx_ROM
+0x07f21379 T dis_hclk
+0x07f21395 T en_kdtc_cal_mod0
+0x07f213b1 T en_kdtc_cal_mod1
+0x07f213bd T kdtc_cal_init_ROM
+0x07f21421 T kdtc_calibration
+0x07f21561 T rf_calibration
+0x07f21569 T rf_adplldig_ldo_on
+0x07f21575 T rf_adplldig_txmod
+0x07f21585 T rf_ldo_cont_mode_en
+0x07f215d5 T rf_adplldig_activate
+0x07f21601 T rf_adplldig_deactivate
+
+; ble_arp.c (controlled by __EXCLUDE_ROM_BLE_ARP__)
+0x07f21635 T rf_sleep
+0x07f21651 T update_radiopwrupdn_pref_setting
+0x07f21679 T rf_regs
+0x07f216b5 T ble_update_arp_adpll_calib_vals_ROM
+0x07f216d5 T ble_update_arp_adpll_div_val_ROM
+0x07f216f5 T ble_update_arp_ROM
+
+; attm_db_128.c (controlled by __EXCLUDE_ROM_ATTM_DB_128__)
+0x07f21751 T attm_svc_create_db_128
+
+; prf.c (controlled by __EXCLUDE_ROM_PRF__)
+0x07f2195d T prf_init_func
+0x07f219dd T prf_add_profile_func
+0x07f21a81 T prf_create_func
+0x07f21abd T prf_cleanup_func
+0x07f21afd T prf_env_get
+0x07f21b29 T prf_src_task_get
+0x07f21b39 T prf_dst_task_get
+0x07f21b4d T prf_get_id_from_task_func
+0x07f21b85 T prf_get_task_from_id_func
+0x07f21bbd T prf_reset_func
+
+; prf_utils.c (controlled by __EXCLUDE_ROM_PRF_UTILS__)
+0x07f21c2d T prf_pack_char_pres_fmt
+0x07f21c4b T prf_pack_date_time
+0x07f21c6b T prf_unpack_date_time
+
+; custs1.c (controlled by __EXCLUDE_ROM_CUSTS1__)
+0x07f21e3d T custs1_prf_itf_get
+
+; custs1_task.c (controlled by __EXCLUDE_ROM_CUSTS1__)
+0x07f21eef T custs1_init_ccc_values
+0x07f21f27 T custs1_set_ccc_value
+
+; custom_common.c (controlled by __EXCLUDE_ROM_CUSTOM_COMMON__)
+0x07f223ed T check_client_char_cfg
+0x07f22417 T get_value_handle
+0x07f22463 T get_cfg_handle
+0x07f224c5 T custs1_get_att_handle
+0x07f224e1 T custs1_get_att_idx
+
+; suotar.c (controlled by __EXCLUDE_ROM_SUOTAR__)
+0x07f22845 T suotar_prf_itf_get
+
+; app.c (controlled by __EXCLUDE_ROM_APP_TASK__)
+0x07f22b35 T app_db_init_start
+0x07f22b51 T app_db_init
+0x07f22b5d T app_easy_gap_confirm
+0x07f22b89 T append_device_name
+0x07f22bad T app_easy_gap_update_adv_data
+0x07f22bf5 T active_conidx_to_conhdl
+0x07f22c19 T active_conhdl_to_conidx
+0x07f22c55 T app_easy_gap_disconnect
+0x07f22c91 T app_easy_gap_advertise_stop
+0x07f22cad T app_timer_set
+0x07f22cc9 T app_easy_gap_set_data_packet_length
+0x07f22d09 T get_user_prf_srv_perm
+0x07f22d31 T app_set_prf_srv_perm
+0x07f22d61 T prf_init_srv_perm
+0x07f22d85 T app_gattc_svc_changed_cmd_send
+0x07f231fd T app_gap_process_handler
+
+; app_entry_point.c (controlled by __EXCLUDE_ROM_APP_TASK__)
+0x07f23219 T app_entry_point_handler
+0x07f23261 T app_std_process_event
+
+; app_utils.c - (controlled by __EXCLUDE_ROM_APP_UTILS__)
+0x07f232a5 T app_get_address_type
+0x07f232df T app_fill_random_byte_array
+
+; ARM library stuff
+0x07f23611 T __aeabi_uldivmod
+0x07f23671 T __aeabi_llsr
+0x07f23671 T _ll_ushift_r
+0x07f23693 T __ARM_clz
+
+; arch_system.c (controlled by __EXCLUDE_ROM_GAP_CFG_DATA__)
+0x07f236e0 D gap_cfg_user_var_struct
+
+; ble_arp.c (controlled by __EXCLUDE_ROM_BLE_ARP__)
+0x07f2377c D arp_init_table
+
+; app_task.c (controlled by __EXCLUDE_ROM_APP_TASK__)
+0x07f23b98 D app_default_handler
+
+; RW _rand_state variable in stdlib/rand.c (microlib)
+0x07fcfa20 D _rand_state_ROM_DATA

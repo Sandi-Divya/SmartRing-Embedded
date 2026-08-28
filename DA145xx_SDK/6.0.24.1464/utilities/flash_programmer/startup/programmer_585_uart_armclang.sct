@@ -1,0 +1,25 @@
+#! armclang -E -I.\..\..\sdk\platform\include\ --target=arm-arm-none-eabi -mcpu=cortex-m0 -xc
+
+#include "sdk_defs.h"
+
+LR_1 0x07FC0000 15*1024 {
+    ER_1 +0 {
+       *.o (RESET, +First)
+       *(InRoot$$Sections)
+        *(startup_code_DA14xxx)
+       *(system_DA14xxx)
+       .ANY(+RO)
+       .ANY(+RW)
+    }
+
+    ER_2 AlignExpr(+0,8) UNINIT {
+       *(.bss.non_init)
+    }
+
+    ER_3 +0 (SDK_RAM_END_ADDR - ImageLimit(ER_2) - SDK_FLASH_PROGRAMMER_STACK_SIZE) {
+        *(+ZI)
+    }
+
+    ; Stack region growing down
+    ARM_LIB_STACK SDK_RAM_END_ADDR EMPTY -SDK_FLASH_PROGRAMMER_STACK_SIZE {}
+}

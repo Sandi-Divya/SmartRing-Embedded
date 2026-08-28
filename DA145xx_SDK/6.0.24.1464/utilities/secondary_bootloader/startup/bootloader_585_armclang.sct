@@ -1,0 +1,32 @@
+#! armclang -E -I.\..\..\sdk\platform\include\ --target=arm-arm-none-eabi -mcpu=cortex-m0 -xc
+
+#include "sdk_defs.h"
+
+LR_PRE_ECC_PATCH SDK_RAM_1_BASE_ADDR SDK_SEC_BL_ECC_PATCH_TABLE_OFFSET {
+    ER_PRE_ECC_PATCH SDK_RAM_1_BASE_ADDR SDK_SEC_BL_ECC_PATCH_TABLE_OFFSET {
+        *.o (RESET, +FIRST)
+    }
+}
+
+; 2 patch function slots for ECC
+LR_ECC_PATCH SDK_RAM_1_BASE_ADDR + SDK_SEC_BL_ECC_PATCH_TABLE_OFFSET SDK_SEC_BL_ECC_PATCH_TABLE_SIZE {
+    ER_ECC_PATCH SDK_RAM_1_BASE_ADDR + SDK_SEC_BL_ECC_PATCH_TABLE_OFFSET EMPTY SDK_SEC_BL_ECC_PATCH_TABLE_SIZE {
+    }
+}
+
+LR_1 SDK_SEC_BOOTLOADER_BASE_LR_ADDRESS SDK_SEC_BOOTLOADER_LOAD_IMAGE_SIZE {
+    ER_1 +0 SDK_SEC_BOOTLOADER_COPY_BASE_ADDRESS {
+        *(InRoot$$Sections)
+        *(startup_code_DA14xxx)
+        *(system_DA14xxx)
+    }
+
+    ; ER_2 starts at the end of the load image area and ends at the Stack
+    ER_2 SDK_SEC_BOOTLOADER_ER_2_START_ADDRESS {
+        .ANY(+RO)
+        .ANY(+RW, +ZI)
+    }
+
+    ; Stack region growing down
+    ARM_LIB_STACK SDK_RAM_END_ADDR EMPTY -SDK_FLASH_PROGRAMMER_STACK_SIZE {}
+}

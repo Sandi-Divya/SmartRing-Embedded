@@ -1,0 +1,281 @@
+/*;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;*/
+/*SDK6 symbols in DA14535AB ROM*/
+/*;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;*/
+
+/*system_DA14535.c (controlled by __EXCLUDE_ROM_SYSTEM_DA14535__)*/
+--define_symbol SystemInit_ROM=0x07f1ead9
+
+/*arch_console.c (controlled by __EXCLUDE_ROM_ARCH_CONSOLE__)*/
+--define_symbol arch_printf_flush=0x07f1edcd
+--define_symbol arch_vprintf=0x07f1ee85
+--define_symbol arch_printf=0x07f1eee5
+--define_symbol arch_puts=0x07f1eef9
+--define_symbol arch_printf_process=0x07f1ef09
+
+/*nvds.c (controlled by __EXCLUDE_ROM_NVDS__)*/
+--define_symbol nvds_get_func=0x07f1efb5
+--define_symbol nvds_init_func=0x07f1f091
+--define_symbol nvds_del_func=0x07f1f095
+--define_symbol nvds_put_func=0x07f1f099
+
+/*arch_system.c (controlled by __EXCLUDE_ROM_ARCH_SYSTEM__)*/
+--define_symbol init_pwr_and_clk_ble_part_start_ROM=0x07f1f09d
+--define_symbol init_pwr_and_clk_ble_part_xtal32k_ROM=0x07f1f0e9
+--define_symbol init_pwr_and_clk_ble_part_rcx_ROM=0x07f1f129
+--define_symbol init_pwr_and_clk_ble_part_end_ROM=0x07f1f161
+--define_symbol calc_rcx_freq_ROM=0x07f1f195
+--define_symbol calc_rcx_freq_stas_ROM=0x07f1f1d1
+--define_symbol check_sys_startup_period_ROM=0x07f1f211
+--define_symbol set_xtal32m_trim_value_ROM=0x07f1f241
+
+/*chacha20.c (controlled by __EXCLUDE_ROM_CHACHA20__)*/
+--define_symbol csprng_seed=0x07f1f329
+--define_symbol csprng_get_next_uint32=0x07f1f359
+
+/*hash.c (controlled by __EXCLUDE_ROM_HASH__)*/
+--define_symbol hash=0x07f1f401
+
+/*otp_cs.c (controlled by __EXCLUDE_ROM_OTP_CS__)*/
+--define_symbol otp_cs_store_ROM=0x07f1f46d
+--define_symbol otp_cs_unpack_pd_rad_enhanced_tx_pwr_ctrl_ROM=0x07f1f615
+--define_symbol otp_cs_unpack_pd_adpll_enhanced_tx_pwr_ctrl_ROM=0x07f1f66d
+--define_symbol otp_cs_load_pd_rad_ROM=0x07f1f6a9
+--define_symbol otp_cs_load_pd_adpll_ROM=0x07f1f711
+
+--define_symbol arch_asm_delay_us=0x07f1f76d
+
+/*syscntl.c (controlled by __EXCLUDE_ROM_SYSCNTL__)*/
+--define_symbol syscntl_use_lowest_amba_clocks=0x07f1f78d
+--define_symbol syscntl_use_highest_amba_clocks=0x07f1f7a3
+--define_symbol syscntl_cfg_xtal32m_amp_reg=0x07f1f7b9
+--define_symbol syscntl_por_vbat_high_cfg=0x07f1f7d1
+--define_symbol syscntl_por_vbat_low_cfg=0x07f1f7f5
+--define_symbol syscntl_dcdc_set_level=0x07f1f81d
+--define_symbol syscntl_dcdc_cfg=0x07f1f845
+--define_symbol syscntl_dcdc_get_level=0x07f1f865
+
+/*syscntl.c (controlled by __EXCLUDE_ROM_SYSCNTL__ and CFG_POWER_MODE_BYPASS)*/
+--define_symbol syscntl_dcdc_turn_off_ROM=0x07f1f87d
+--define_symbol syscntl_dcdc_turn_on_in_boost_ROM=0x07f1f8cd
+--define_symbol syscntl_dcdc_turn_on_in_buck_ROM=0x07f1f929
+
+/*gpio.c (controlled by __EXCLUDE_ROM_GPIO__)*/
+--define_symbol GPIO_SetPinFunction_ROM=0x07f1f955
+--define_symbol GPIO_GetPinFunction_ROM=0x07f1f965
+--define_symbol GPIO_SetInactive_ROM=0x07f1f979
+--define_symbol GPIO_SetActive_ROM=0x07f1f989
+--define_symbol GPIO_ConfigurePin_ROM=0x07f1f999
+--define_symbol GPIO_ConfigurePinPower_ROM=0x07f1f9bd
+--define_symbol GPIO_GetPinStatus_ROM=0x07f1f9d5
+--define_symbol GPIO_is_valid_da14531_qfn_ROM=0x07f1f9ed
+--define_symbol GPIO_is_valid_da14531_wlscp_ROM=0x07f1f9f9
+--define_symbol GPIO_EnableIRQ_ROM=0x07f1fa05
+--define_symbol GPIO_GetIRQInputLevel=0x07f1fafd
+--define_symbol GPIO_SetIRQInputLevel=0x07f1fb8d
+--define_symbol GPIO_ResetIRQ=0x07f1fbb1
+--define_symbol GPIO_EnablePorPin_ROM=0x07f1fbd5
+--define_symbol GPIO_DisablePorPin=0x07f1fbf9
+--define_symbol GPIO_SetPorTime=0x07f1fc05
+--define_symbol GPIO_GetPorTime=0x07f1fc15
+
+/*wkupct_quadec.c (controlled by __EXCLUDE_ROM_WKUPCT_QUADEC__)*/
+--define_symbol wkupct_set_deb_unit_time=0x07f1fcc5
+--define_symbol wkupct_enable_irq_ROM=0x07f1fce5
+--define_symbol wkupct2_enable_irq_ROM=0x07f1fd2d
+--define_symbol wkupct_disable_irq=0x07f1fd75
+--define_symbol wkupct2_disable_irq=0x07f1fd91
+--define_symbol quad_decoder_init=0x07f1fdad
+--define_symbol quad_decoder_disable_irq=0x07f1fdf1
+--define_symbol quad_decoder_release=0x07f1fe09
+--define_symbol quad_decoder_enable_irq=0x07f1fe29
+--define_symbol quad_decoder_clear_irq=0x07f1fe59
+
+/*TRNG implementation in ROM*/
+--define_symbol trng_acquire=0x07f1fea9
+--define_symbol trng_acquire_v2=0x07f1fed9
+
+/*spi_531.c (controlled by __EXCLUDE_ROM_SPI_531__)*/
+--define_symbol spi_slave_send=0x07f1ff05
+--define_symbol spi_slave_receive=0x07f1ff95
+--define_symbol spi_slave_transfer=0x07f20049
+--define_symbol spi_master_send=0x07f200e1
+--define_symbol spi_master_receive=0x07f20151
+--define_symbol spi_master_transfer=0x07f201e9
+--define_symbol spi_set_speed=0x07f202b1
+--define_symbol spi_enable=0x07f20305
+--define_symbol spi_disable=0x07f20329
+--define_symbol spi_set_cp_mode=0x07f2034d
+--define_symbol spi_set_bitmode=0x07f20361
+--define_symbol spi_initialize_ROM=0x07f2038d
+--define_symbol spi_cs_high=0x07f203f5
+--define_symbol spi_access=0x07f20411
+--define_symbol spi_get_incr=0x07f2047d
+--define_symbol spi_get_wsz=0x07f20491
+
+/*i2c_eeprom.c (controlled by __EXCLUDE_ROM_I2C_EEPROM__)*/
+--define_symbol i2c_eeprom_release=0x07f20611
+--define_symbol i2c_write_last_byte=0x07f20619
+
+/*uart.c (controlled by __EXCLUDE_ROM_UART__)*/
+--define_symbol uart_enable=0x07f20629
+--define_symbol uart_disable=0x07f2065d
+--define_symbol uart_write_byte=0x07f206c7
+--define_symbol uart_write_buffer=0x07f206d5
+--define_symbol uart_wait_tx_finish=0x07f206f3
+--define_symbol uart_read_byte=0x07f206ff
+--define_symbol uart_read_buffer=0x07f2070d
+--define_symbol uart_enable_flow_control=0x07f20729
+--define_symbol uart_disable_flow_control_ROM=0x07f2074d
+
+/*i2c.c (controlled by __EXCLUDE_ROM_I2C__)*/
+--define_symbol i2c_setup_slave=0x07f207ad
+--define_symbol i2c_setup_master=0x07f207dd
+--define_symbol i2c_init=0x07f20825
+--define_symbol i2c_release=0x07f208f1
+--define_symbol i2c_master_transmit_buffer_sync=0x07f20915
+--define_symbol i2c_master_receive_buffer_sync=0x07f2098d
+--define_symbol i2c_slave_receive_buffer_sync=0x07f20a05
+--define_symbol i2c_slave_transmit_buffer_sync=0x07f20a2d
+
+/*hw_otpc_531.c (controlled by __EXCLUDE_ROM_HW_OTPC_531__)*/
+--define_symbol otpc_dcdc_cfg=0x07f20a89
+--define_symbol hw_otpc_set_speed=0x07f20b11
+--define_symbol hw_otpc_word_prog_and_verify=0x07f20b95
+--define_symbol hw_otpc_word_read=0x07f20bd9
+--define_symbol hw_otpc_prog=0x07f20bf1
+--define_symbol hw_otpc_prog_and_verify=0x07f20c25
+--define_symbol hw_otpc_read=0x07f20c5b
+--define_symbol hw_otpc_disable_ROM=0x07f20c85
+
+/*hw_otpc_531.c (controlled by __EXCLUDE_ROM_HW_OTPC_531__ and CFG_POWER_MODE_BYPASS)*/
+--define_symbol hw_otpc_enter_mode_ROM=0x07f20abd
+--define_symbol hw_otpc_init_ROM=0x07f20b2d
+
+/*adc_531.c (controlled by __EXCLUDE_ROM_ADC_531__)*/
+--define_symbol adc_set_diff_input=0x07f20d35
+--define_symbol adc_set_se_input=0x07f20d49
+--define_symbol adc_enable=0x07f20e79
+--define_symbol adc_init_ROM=0x07f20e89
+--define_symbol adc_reset=0x07f20ed5
+--define_symbol adc_disable=0x07f20f01
+--define_symbol adc_start=0x07f20f11
+--define_symbol adc_get_sample=0x07f20f21
+--define_symbol adc_offset_calibrate_ROM=0x07f20f3d
+--define_symbol adc_correct_sample_ROM=0x07f21019
+--define_symbol adc_get_temp_ROM=0x07f21071
+
+/*rwble.c (controlled by __EXCLUDE_ROM_RWBLE__)*/
+--define_symbol BLE_WAKEUP_LP_Handler_ROM=0x07f2111d
+--define_symbol rwble_isr_ROM=0x07f21171
+
+/*rwip.c (controlled by __EXCLUDE_ROM_RWIP__)*/
+--define_symbol rwip_sleep_part1_ROM=0x07f211a1
+--define_symbol rwip_sleep_part2_ROM=0x07f2120d
+--define_symbol rwip_sleep_part3_ROM=0x07f21251
+
+/*rf_531.c (controlled by __EXCLUDE_ROM_RF_531__)*/
+--define_symbol dis_adpll_ROM=0x07f212a1
+--define_symbol kdtc_cal_end_ROM=0x07f212d1
+--define_symbol dis_kdtc_cal=0x07f2131d
+--define_symbol en_hclk=0x07f2132d
+--define_symbol en_adpll_tx_ROM=0x07f21339
+--define_symbol dis_hclk=0x07f21379
+--define_symbol en_kdtc_cal_mod0=0x07f21395
+--define_symbol en_kdtc_cal_mod1=0x07f213b1
+--define_symbol kdtc_cal_init_ROM=0x07f213bd
+--define_symbol kdtc_calibration=0x07f21421
+--define_symbol rf_calibration=0x07f21561
+--define_symbol rf_adplldig_ldo_on=0x07f21569
+--define_symbol rf_adplldig_txmod=0x07f21575
+--define_symbol rf_ldo_cont_mode_en=0x07f21585
+--define_symbol rf_adplldig_activate=0x07f215d5
+--define_symbol rf_adplldig_deactivate=0x07f21601
+
+/*ble_arp.c (controlled by __EXCLUDE_ROM_BLE_ARP__)*/
+--define_symbol rf_sleep=0x07f21635
+--define_symbol update_radiopwrupdn_pref_setting=0x07f21651
+--define_symbol rf_regs=0x07f21679
+--define_symbol ble_update_arp_adpll_calib_vals_ROM=0x07f216b5
+--define_symbol ble_update_arp_adpll_div_val_ROM=0x07f216d5
+--define_symbol ble_update_arp_ROM=0x07f216f5
+
+/*attm_db_128.c (controlled by __EXCLUDE_ROM_ATTM_DB_128__)*/
+--define_symbol attm_svc_create_db_128=0x07f21751
+
+/*prf.c (controlled by __EXCLUDE_ROM_PRF__)*/
+--define_symbol prf_init_func=0x07f2195d
+--define_symbol prf_add_profile_func=0x07f219dd
+--define_symbol prf_create_func=0x07f21a81
+--define_symbol prf_cleanup_func=0x07f21abd
+--define_symbol prf_env_get=0x07f21afd
+--define_symbol prf_src_task_get=0x07f21b29
+--define_symbol prf_dst_task_get=0x07f21b39
+--define_symbol prf_get_id_from_task_func=0x07f21b4d
+--define_symbol prf_get_task_from_id_func=0x07f21b85
+--define_symbol prf_reset_func=0x07f21bbd
+
+/*prf_utils.c (controlled by __EXCLUDE_ROM_PRF_UTILS__)*/
+--define_symbol prf_pack_char_pres_fmt=0x07f21c2d
+--define_symbol prf_pack_date_time=0x07f21c4b
+--define_symbol prf_unpack_date_time=0x07f21c6b
+
+/*custs1.c (controlled by __EXCLUDE_ROM_CUSTS1__)*/
+--define_symbol custs1_prf_itf_get=0x07f21e3d
+
+/*custs1_task.c (controlled by __EXCLUDE_ROM_CUSTS1__)*/
+--define_symbol custs1_init_ccc_values=0x07f21eef
+--define_symbol custs1_set_ccc_value=0x07f21f27
+
+/*custom_common.c (controlled by __EXCLUDE_ROM_CUSTOM_COMMON__)*/
+--define_symbol check_client_char_cfg=0x07f223ed
+--define_symbol get_value_handle=0x07f22417
+--define_symbol get_cfg_handle=0x07f22463
+--define_symbol custs1_get_att_handle=0x07f224c5
+--define_symbol custs1_get_att_idx=0x07f224e1
+
+/*suotar.c (controlled by __EXCLUDE_ROM_SUOTAR__)*/
+--define_symbol suotar_prf_itf_get=0x07f22845
+
+/*app.c (controlled by __EXCLUDE_ROM_APP_TASK__)*/
+--define_symbol app_db_init_start=0x07f22b35
+--define_symbol app_db_init=0x07f22b51
+--define_symbol app_easy_gap_confirm=0x07f22b5d
+--define_symbol append_device_name=0x07f22b89
+--define_symbol app_easy_gap_update_adv_data=0x07f22bad
+--define_symbol active_conidx_to_conhdl=0x07f22bf5
+--define_symbol active_conhdl_to_conidx=0x07f22c19
+--define_symbol app_easy_gap_disconnect=0x07f22c55
+--define_symbol app_easy_gap_advertise_stop=0x07f22c91
+--define_symbol app_timer_set=0x07f22cad
+--define_symbol app_easy_gap_set_data_packet_length=0x07f22cc9
+--define_symbol get_user_prf_srv_perm=0x07f22d09
+--define_symbol app_set_prf_srv_perm=0x07f22d31
+--define_symbol prf_init_srv_perm=0x07f22d61
+--define_symbol app_gattc_svc_changed_cmd_send=0x07f22d85
+--define_symbol app_gap_process_handler=0x07f231fd
+
+/*app_entry_point.c (controlled by __EXCLUDE_ROM_APP_TASK__)*/
+--define_symbol app_entry_point_handler=0x07f23219
+--define_symbol app_std_process_event=0x07f23261
+
+/*app_utils.c - (controlled by __EXCLUDE_ROM_APP_UTILS__)*/
+--define_symbol app_get_address_type=0x07f232a5
+--define_symbol app_fill_random_byte_array=0x07f232df
+
+/*ARM library stuff*/
+--define_symbol __aeabi_uldivmod=0x07f23611
+--define_symbol __aeabi_llsr=0x07f23671
+--define_symbol _ll_ushift_r=0x07f23671
+--define_symbol __ARM_clz=0x07f23693
+
+/*arch_system.c (controlled by __EXCLUDE_ROM_GAP_CFG_DATA__)*/
+--define_symbol gap_cfg_user_var_struct=0x07f236e0
+
+/*ble_arp.c (controlled by __EXCLUDE_ROM_BLE_ARP__)*/
+--define_symbol arp_init_table=0x07f2377c
+
+/*app_task.c (controlled by __EXCLUDE_ROM_APP_TASK__)*/
+--define_symbol app_default_handler=0x07f23b98
+
+/*RW _rand_state variable in stdlib/rand.c (microlib)*/
+--define_symbol _rand_state_ROM_DATA=0x07fcfa20

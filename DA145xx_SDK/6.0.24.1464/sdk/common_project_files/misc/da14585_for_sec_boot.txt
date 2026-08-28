@@ -1,0 +1,8 @@
+#<SYMDEFS># ARM Linker, 5060422: Last Updated: Wed Mar 15 11:21:38 2017
+; uECC ROM symbols
+0x07f1dbdd T uECC_verify
+0x07f1cdd5 T uECC_secp256r1
+0x07f02035 T uECC_vli_mult
+
+; rwip_schedule function symbol
+0x07f1c3db T rwip_schedule
