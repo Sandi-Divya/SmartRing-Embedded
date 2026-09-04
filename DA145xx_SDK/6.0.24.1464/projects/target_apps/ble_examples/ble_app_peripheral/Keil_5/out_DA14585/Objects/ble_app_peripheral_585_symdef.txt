@@ -1,4 +1,4 @@
-#<SYMDEFS># ARM Linker, 6240002: Last Updated: Fri Aug 28 16:42:43 2026
+#<SYMDEFS># ARM Linker, 6240002: Last Updated: Fri Sep  4 10:52:22 2026
 0x07f02001 T uECC_vli_add
 0x07f02019 T uECC_vli_sub
 0x07f02035 T uECC_vli_mult
@@ -845,14 +845,14 @@
 0x07fc1eb5 T arch_asm_delay_us
 0x07fc1ed5 T __scatterload
 0x07fc1ed5 T __scatterload_rt2
-0x07fc21dd T HardFault_HandlerC
-0x07fc2251 T NMI_HandlerC
-0x07fc416d T main
-0x07fc582d T __scatterload_copy
-0x07fc583b T __scatterload_null
-0x07fc583d T __scatterload_zeroinit
-0x07fc618c D my_custom_msg_handlers
-0x07fc66a0 D stack_var
+0x07fc21f9 T HardFault_HandlerC
+0x07fc226d T NMI_HandlerC
+0x07fc4229 T main
+0x07fc57e5 T __scatterload_copy
+0x07fc57f3 T __scatterload_null
+0x07fc57f5 T __scatterload_zeroinit
+0x07fc61f0 D my_custom_msg_handlers
+0x07fc6710 D stack_var
 0x07fd7600 D ble_wakeup_executed
 0x07fd7601 D rf_in_sleep
 0x07fd7604 D custom_preinit

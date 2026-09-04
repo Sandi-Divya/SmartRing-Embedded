@@ -1,6 +1,5 @@
-
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   PermissionsAndroid,
@@ -10,2157 +9,1007 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { BleManager, Device, State } from 'react-native-ble-plx';
 
-/*
- * ============================================================
- * SR08 COMPANION APP
- * ============================================================
- *
- * BLE DEVICE:
- *      DLG-PRPH
- *
- * RING MAC PREFIX:
- *      48:23:35
- *
- * BATTERY:
- *      UUID:
- *      15005991-b131-3396-014c-664c9867b917
- *
- * Battery values supported:
- *
- *      Raw byte:
- *          0x55 -> 85
- *
- *      ASCII:
- *          "85" -> 85
- *
- *      Base64:
- *          VQ== -> 0x55 -> 85
- *
- * ============================================================
- */
-
-
-/*
- * ============================================================
- * BLE UUIDs
- * ============================================================
- */
-
 const RING_NAME = 'DLG-PRPH';
-
 const RING_MAC_PREFIX = '48:23:35';
 
 const DATA_SERVICE =
   '18424398-7cbc-11e9-8f9e-2a86e4085a59';
 
-const DIGIT_CHARACTERISTIC =
-  '2d86686a-53dc-25b3-0c4a-f0e10c8dee20';
-
-const LETTER_CHARACTERISTIC =
-  '5a87b4ef-3bfa-76a8-e642-92933c31434f';
-
 const TELEMETRY_CHARACTERISTIC =
   '15005991-b131-3396-014c-664c9867b917';
 
+const HEART_RATE_SERVICE =
+  '184247d0-7cbc-11e9-089e-2a86e4085a59';
 
-/*
- * ============================================================
- * BASE64 ENCODING
- * ============================================================
- */
+const HEART_RATE_CHARACTERISTIC =
+  '16005991-b131-3396-014c-664c9867b919';
 
-function encode(value: string) {
-  return btoa(value);
+type HeartRateReading = {
+  value: number;
+  timestamp: number;
+};
+
+const MAX_HR_READINGS = 240;
+
+function decodeBase64(value: string): number[] {
+  try {
+    const binary = atob(value);
+    const bytes: number[] = [];
+
+    for (let i = 0; i < binary.length; i++) {
+      bytes.push(binary.charCodeAt(i));
+    }
+
+    return bytes;
+  } catch {
+    return [];
+  }
 }
 
+function decodeTelemetry(value: string): number | null {
+  const bytes = decodeBase64(value);
 
-/*
- * ============================================================
- * BATTERY DECODER
- * ============================================================
- *
- * react-native-ble-plx gives characteristic.value as Base64.
- *
- * Example:
- *
- *      Firmware sends:
- *
- *          0x55
- *
- *      BLE gives:
- *
- *          VQ==
- *
- *      Base64 decoded:
- *
- *          0x55
- *
- *      Decimal:
- *
- *          85
- *
- * Therefore:
- *
- *      VQ== -> 85%
- *
- * The function also supports:
- *
- *      "85"
- *      "100"
- *      0x55
- *      0x64
- *
- * ============================================================
- */
+  if (bytes.length === 0) {
+    return null;
+  }
+
+  const text = String.fromCharCode(...bytes).trim();
+
+  if (/^\d{1,3}$/.test(text)) {
+    const number = parseInt(text, 10);
+
+    if (number >= 0 && number <= 100) {
+      return number;
+    }
+  }
+
+  const raw = bytes[0];
+
+  if (raw >= 0 && raw <= 100) {
+    return raw;
+  }
+
+  return null;
+}
 
 function decodeBattery(value: string): number | null {
+  const bytes = decodeBase64(value);
 
-  if (!value) {
+  if (bytes.length === 0) {
     return null;
   }
 
-  try {
+  const text = String.fromCharCode(...bytes).trim();
 
-    /*
-     * Convert Base64 into raw binary bytes.
-     */
-    const binaryString = atob(value);
+  if (/^\d{1,3}$/.test(text)) {
+    const number = parseInt(text, 10);
 
-    const bytes = new Uint8Array(
-      binaryString.length
-    );
-
-    for (
-      let i = 0;
-      i < binaryString.length;
-      i++
-    ) {
-      bytes[i] =
-        binaryString.charCodeAt(i);
+    if (number >= 0 && number <= 100) {
+      return number;
     }
-
-
-    /*
-     * --------------------------------------------------------
-     * CASE 1
-     * --------------------------------------------------------
-     *
-     * Firmware sends ASCII:
-     *
-     *      "85"
-     *
-     * BLE Base64:
-     *
-     *      OD U=   (depending on value)
-     *
-     * Decode to readable text.
-     */
-
-    let asciiText = '';
-
-    let allAscii = true;
-
-    for (const byte of bytes) {
-
-      if (
-        byte >= 32 &&
-        byte <= 126
-      ) {
-
-        asciiText +=
-          String.fromCharCode(byte);
-
-      } else {
-
-        allAscii = false;
-
-      }
-    }
-
-
-    if (allAscii) {
-
-      asciiText =
-        asciiText.trim();
-
-      if (
-        /^[0-9]+$/.test(
-          asciiText
-        )
-      ) {
-
-        const number =
-          parseInt(
-            asciiText,
-            10
-          );
-
-        if (
-          number >= 0 &&
-          number <= 100
-        ) {
-
-          console.log(
-            'Battery format: ASCII'
-          );
-
-          console.log(
-            'ASCII battery:',
-            asciiText
-          );
-
-          return number;
-        }
-      }
-    }
-
-
-    /*
-     * --------------------------------------------------------
-     * CASE 2
-     * --------------------------------------------------------
-     *
-     * Firmware sends one raw byte.
-     *
-     * Example:
-     *
-     *      0x55
-     *
-     *      decimal = 85
-     */
-
-    if (bytes.length > 0) {
-
-      const rawValue =
-        bytes[0];
-
-      console.log(
-        'Battery format: RAW BYTE'
-      );
-
-      console.log(
-        'Raw byte decimal:',
-        rawValue
-      );
-
-      console.log(
-        'Raw byte hex:',
-        '0x' +
-        rawValue
-          .toString(16)
-          .padStart(2, '0')
-          .toUpperCase()
-      );
-
-
-      if (
-        rawValue >= 0 &&
-        rawValue <= 100
-      ) {
-
-        return rawValue;
-
-      }
-    }
-
-    return null;
-
-  } catch (error) {
-
-    console.log(
-      'Battery decode error:',
-      error
-    );
-
-    return null;
   }
+
+  const raw = bytes[0];
+
+  if (raw >= 0 && raw <= 100) {
+    return raw;
+  }
+
+  return null;
 }
 
+function decodeHeartRate(value: string): number | null {
+  const bytes = decodeBase64(value);
 
-/*
- * ============================================================
- * GENERAL TELEMETRY DECODER
- * ============================================================
- *
- * Used for displaying LIVE TELEMETRY.
- *
- * Battery is handled separately by decodeBattery().
- *
- * ============================================================
- */
-
-function decodeTelemetry(
-  value: string
-) {
-
-  if (!value) {
-    return '';
+  if (bytes.length === 0) {
+    return null;
   }
 
-  try {
+  const text = String.fromCharCode(...bytes).trim();
 
-    const binaryString =
-      atob(value);
+  if (/^\d{1,3}$/.test(text)) {
+    const number = parseInt(text, 10);
 
-    const bytes =
-      new Uint8Array(
-        binaryString.length
-      );
-
-    for (
-      let i = 0;
-      i < binaryString.length;
-      i++
-    ) {
-
-      bytes[i] =
-        binaryString.charCodeAt(i);
-
+    if (number > 0 && number <= 250) {
+      return number;
     }
-
-
-    /*
-     * Try ASCII first.
-     */
-
-    let text = '';
-
-    let validAscii = true;
-
-    for (const byte of bytes) {
-
-      if (
-        byte >= 32 &&
-        byte <= 126
-      ) {
-
-        text +=
-          String.fromCharCode(byte);
-
-      } else {
-
-        validAscii = false;
-
-      }
-    }
-
-
-    text = text.trim();
-
-
-    if (
-      validAscii &&
-      text.length > 0
-    ) {
-
-      return text;
-
-    }
-
-
-    /*
-     * Raw byte.
-     */
-
-    if (bytes.length > 0) {
-
-      return bytes[0].toString();
-
-    }
-
-    return '';
-
-  } catch (error) {
-
-    console.log(
-      'Telemetry decode error:',
-      error
-    );
-
-    return value;
   }
+
+  const raw = bytes[0];
+
+  if (raw > 0 && raw <= 250) {
+    return raw;
+  }
+
+  return null;
 }
 
+function getHeartRateStatus(
+  value: number | null
+): {
+  label: string;
+  description: string;
+  level:
+    | 'normal'
+    | 'elevated'
+    | 'high'
+    | 'veryHigh'
+    | 'low'
+    | 'veryLow';
+} {
+  if (value === null) {
+    return {
+      label: 'Waiting',
+      description: 'Waiting for heart rate data.',
+      level: 'normal',
+    };
+  }
 
-/*
- * ============================================================
- * APP
- * ============================================================
- */
+  if (value < 40) {
+    return {
+      label: 'Very low',
+      description:
+        'Heart rate is below the low range. If this is persistent or accompanied by symptoms, seek medical attention.',
+      level: 'veryLow',
+    };
+  }
+
+  if (value < 50) {
+    return {
+      label: 'Low',
+      description:
+        'Heart rate is below the typical resting range.',
+      level: 'low',
+    };
+  }
+
+  if (value <= 100) {
+    return {
+      label: 'Normal',
+      description:
+        'Heart rate is within the typical resting range.',
+      level: 'normal',
+    };
+  }
+
+  if (value <= 120) {
+    return {
+      label: 'Elevated',
+      description:
+        'Heart rate is above the typical resting range.',
+      level: 'elevated',
+    };
+  }
+
+  if (value <= 150) {
+    return {
+      label: 'High',
+      description:
+        'Heart rate is considerably elevated.',
+      level: 'high',
+    };
+  }
+
+  return {
+    label: 'Very high',
+    description:
+      'Heart rate is very high. If this occurs at rest or with concerning symptoms, seek medical attention.',
+    level: 'veryHigh',
+  };
+}
 
 export default function App() {
+  const managerRef = useRef(new BleManager());
+
+  const [device, setDevice] = useState<Device | null>(null);
+  const [status, setStatus] = useState('Disconnected');
+
+  const [battery, setBattery] = useState<number | null>(null);
+  const [heartRate, setHeartRate] = useState<number | null>(null);
+  const [telemetry, setTelemetry] = useState<string | null>(null);
+
+  const [isDarkMode, setIsDarkMode] = useState(false);
+
+  const [activeTab, setActiveTab] =
+    useState<'home' | 'heartRate'>('home');
 
   /*
-   * BLE manager.
+   * IMPORTANT:
+   * This history is NOT cleared when the ring disconnects.
    */
+  const [heartRateReadings, setHeartRateReadings] =
+    useState<HeartRateReading[]>([]);
 
-  const manager =
-    useRef(
-      Platform.OS === 'web'
-        ? null
-        : new BleManager()
-    ).current;
+  const [graphWidth, setGraphWidth] = useState(0);
 
+  const scanningRef = useRef(false);
+  const connectingRef = useRef(false);
+  const seenDevicesRef = useRef<Set<string>>(new Set());
+
+  const batterySubscriptionRef = useRef<any>(null);
+  const heartRateSubscriptionRef = useRef<any>(null);
+  const disconnectSubscriptionRef = useRef<any>(null);
+
+  const styles = isDarkMode ? darkStyles : lightStyles;
+
+  const hrStatus = getHeartRateStatus(heartRate);
 
   /*
-   * Prevent duplicate scanning.
+   * ============================================================
+   * RECORD HEART RATE
+   * ============================================================
    */
 
-  const isScanningRef =
-    useRef(false);
-
-
-  /*
-   * Prevent duplicate connection attempts.
-   */
-
-  const isConnectingRef =
-    useRef(false);
-
-
-  /*
-   * Remember devices already seen.
-   *
-   * This prevents console spam such as:
-   *
-   * DLG-PRPH
-   * DLG-PRPH
-   * DLG-PRPH
-   * DLG-PRPH
-   */
-
-  const seenDevicesRef =
-    useRef(
-      new Set<string>()
-    );
-
-
-  /*
-   * BLE notification subscription.
-   */
-
-  const telemetrySubscriptionRef =
-    useRef<any>(null);
-
-
-  /*
-   * Device state.
-   */
-
-  const [device, setDevice] =
-    useState<Device | null>(null);
-
-
-  /*
-   * Status.
-   */
-
-  const [status, setStatus] =
-    useState(
-      'Ready to scan'
-    );
-
-
-  /*
-   * Battery.
-   */
-
-  const [battery, setBattery] =
-    useState<number | null>(null);
-
-
-  /*
-   * Digit.
-   */
-
-  const [digit, setDigit] =
-    useState('7');
-
-
-  /*
-   * Letter.
-   */
-
-  const [letter, setLetter] =
-    useState('A');
-
-
-  /*
-   * Telemetry text.
-   */
-
-  const [telemetry, setTelemetry] =
-    useState(
-      'No sensor data yet'
-    );
-
-
-  /*
-   * Theme.
-   */
-
-  const [isDarkMode, setIsDarkMode] =
-    useState(true);
-
-
-  /*
-   * ==========================================================
-   * BLUETOOTH STATE LISTENER
-   * ==========================================================
-   */
-
-  useEffect(() => {
-
-    if (!manager) {
+  const recordHeartRate = (value: number) => {
+    if (value <= 0 || value > 250) {
       return;
     }
 
+    setHeartRateReadings((previous) => [
+      ...previous.slice(-(MAX_HR_READINGS - 1)),
+      {
+        value,
+        timestamp: Date.now(),
+      },
+    ]);
+  };
 
-    const subscription =
-      manager.onStateChange(
-        (state) => {
+  /*
+   * ============================================================
+   * SUBSCRIPTIONS
+   * ============================================================
+   */
 
-          console.log(
-            'Bluetooth state:',
-            state
-          );
+  const clearSubscriptions = () => {
+    batterySubscriptionRef.current?.remove();
+    heartRateSubscriptionRef.current?.remove();
+    disconnectSubscriptionRef.current?.remove();
 
+    batterySubscriptionRef.current = null;
+    heartRateSubscriptionRef.current = null;
+    disconnectSubscriptionRef.current = null;
+  };
+
+  /*
+   * ============================================================
+   * BLUETOOTH STATE
+   * ============================================================
+   */
+
+  useEffect(() => {
+    const manager = managerRef.current;
+
+    const subscription = manager.onStateChange(
+      (state) => {
+        if (state !== State.PoweredOn) {
+          clearSubscriptions();
+
+          setDevice(null);
+          setBattery(null);
+          setHeartRate(null);
+          setTelemetry(null);
 
           /*
-           * Bluetooth OFF.
+           * DO NOT CLEAR heartRateReadings HERE.
+           *
+           * Historical heart-rate data stays in the app.
+           */
+
+          setStatus('Bluetooth off');
+        } else {
+          setStatus('Disconnected');
+        }
+      },
+      true
+    );
+
+    return () => {
+      subscription.remove();
+      clearSubscriptions();
+      manager.destroy();
+    };
+  }, []);
+
+  /*
+   * ============================================================
+   * DISCONNECT
+   * ============================================================
+   */
+
+  const disconnectFromRing = async () => {
+    scanningRef.current = false;
+    connectingRef.current = false;
+
+    clearSubscriptions();
+
+    const currentDevice = device;
+
+    try {
+      if (currentDevice) {
+        const connected =
+          await currentDevice.isConnected();
+
+        if (connected) {
+          await currentDevice.cancelConnection();
+        }
+      }
+    } catch (error) {
+      console.log('Disconnect error:', error);
+    } finally {
+      setDevice(null);
+      setBattery(null);
+      setHeartRate(null);
+      setTelemetry(null);
+
+      /*
+       * IMPORTANT:
+       * Historical HR readings are intentionally preserved.
+       */
+
+      setStatus('Disconnected');
+      seenDevicesRef.current.clear();
+    }
+  };
+
+  /*
+   * ============================================================
+   * CONNECT
+   * ============================================================
+   */
+
+  const connectToRing = async (
+    foundDevice: Device
+  ) => {
+    if (connectingRef.current) {
+      return;
+    }
+
+    connectingRef.current = true;
+
+    try {
+      setStatus('Connecting...');
+
+      const manager = managerRef.current;
+
+      const connectedDevice =
+        await manager.connectToDevice(
+          foundDevice.id,
+          {
+            autoConnect: false,
+          }
+        );
+
+      const isConnected =
+        await connectedDevice.isConnected();
+
+      if (!isConnected) {
+        throw new Error(
+          'Device is not connected'
+        );
+      }
+
+      setDevice(connectedDevice);
+      setStatus('Connected');
+
+      disconnectSubscriptionRef.current?.remove();
+
+      disconnectSubscriptionRef.current =
+        connectedDevice.onDisconnected(
+          (error) => {
+            console.log(
+              'Disconnected:',
+              error
+            );
+
+            batterySubscriptionRef.current?.remove();
+            heartRateSubscriptionRef.current?.remove();
+
+            batterySubscriptionRef.current = null;
+            heartRateSubscriptionRef.current = null;
+
+            setDevice(null);
+            setBattery(null);
+            setHeartRate(null);
+            setTelemetry(null);
+
+            /*
+             * IMPORTANT:
+             * DO NOT clear heartRateReadings.
+             */
+
+            setStatus('Disconnected');
+          }
+        );
+
+      const discoveredDevice =
+        await connectedDevice
+          .discoverAllServicesAndCharacteristics();
+
+      const services =
+        await discoveredDevice.services();
+
+      console.log(
+        'Services:',
+        services.map(
+          (service) => service.uuid
+        )
+      );
+
+      for (const service of services) {
+        const characteristics =
+          await service.characteristics();
+
+        console.log(
+          'Service:',
+          service.uuid,
+          'Characteristics:',
+          characteristics.map(
+            (characteristic) =>
+              characteristic.uuid
+          )
+        );
+      }
+
+      /*
+       * ========================================================
+       * HEART RATE
+       * ========================================================
+       */
+
+      const heartRateService =
+        services.find(
+          (service) =>
+            service.uuid.toLowerCase() ===
+            HEART_RATE_SERVICE.toLowerCase()
+        );
+
+      if (!heartRateService) {
+        console.log(
+          'Heart rate service not found'
+        );
+      } else {
+        const characteristics =
+          await heartRateService.characteristics();
+
+        const heartRateCharacteristic =
+          characteristics.find(
+            (characteristic) =>
+              characteristic.uuid.toLowerCase() ===
+              HEART_RATE_CHARACTERISTIC.toLowerCase()
+          );
+
+        if (!heartRateCharacteristic) {
+          console.log(
+            'Heart rate characteristic not found'
+          );
+        } else {
+          console.log(
+            'Heart rate characteristic found:',
+            heartRateCharacteristic.uuid
+          );
+
+          /*
+           * INITIAL HR READ
            */
 
           if (
-            state !==
-            State.PoweredOn
+            heartRateCharacteristic.isReadable
           ) {
+            try {
+              const readValue =
+                await discoveredDevice
+                  .readCharacteristicForService(
+                    HEART_RATE_SERVICE,
+                    HEART_RATE_CHARACTERISTIC
+                  );
 
-            /*
-             * Stop scanning.
-             */
+              if (readValue.value) {
+                const hr =
+                  decodeHeartRate(
+                    readValue.value
+                  );
 
-            manager.stopDeviceScan();
+                if (hr !== null) {
+                  console.log(
+                    'Initial heart rate:',
+                    hr
+                  );
 
-            isScanningRef.current =
-              false;
-
-            isConnectingRef.current =
-              false;
-
-
-            /*
-             * Remove notification.
-             */
-
-            if (
-              telemetrySubscriptionRef.current
-            ) {
-
-              telemetrySubscriptionRef
-                .current
-                .remove();
-
-              telemetrySubscriptionRef
-                .current = null;
+                  setHeartRate(hr);
+                  recordHeartRate(hr);
+                }
+              }
+            } catch (error) {
+              console.log(
+                'Heart rate read error:',
+                error
+              );
             }
-
-
-            setDevice(null);
-
-            setBattery(null);
-
-            setTelemetry(
-              'No sensor data yet'
-            );
-
-            setStatus(
-              'Bluetooth is turned off'
-            );
-
           }
 
-        },
-        true
-      );
+          /*
+           * HR NOTIFICATIONS
+           */
 
+          heartRateSubscriptionRef.current?.remove();
 
-    /*
-     * Cleanup.
-     */
+          heartRateSubscriptionRef.current =
+            discoveredDevice
+              .monitorCharacteristicForService(
+                HEART_RATE_SERVICE,
+                HEART_RATE_CHARACTERISTIC,
+                (error, characteristic) => {
+                  if (error) {
+                    console.log(
+                      'Heart rate notification error:',
+                      error
+                    );
 
-    return () => {
+                    return;
+                  }
 
-      subscription.remove();
+                  if (
+                    !characteristic?.value
+                  ) {
+                    return;
+                  }
 
-      manager.stopDeviceScan();
+                  console.log(
+                    'Heart rate notification:',
+                    characteristic.value
+                  );
 
-      if (
-        telemetrySubscriptionRef.current
-      ) {
+                  const hr =
+                    decodeHeartRate(
+                      characteristic.value
+                    );
 
-        telemetrySubscriptionRef
-          .current
-          .remove();
-
-        telemetrySubscriptionRef
-          .current = null;
-
-      }
-
-    };
-
-  }, [manager]);
-
-
-  /*
-   * ==========================================================
-   * DISCONNECT
-   * ==========================================================
-   */
-
-  const disconnectDevice =
-    async () => {
-
-      /*
-       * Stop scanner.
-       */
-
-      manager?.stopDeviceScan();
-
-      isScanningRef.current =
-        false;
-
-      isConnectingRef.current =
-        false;
-
-
-      /*
-       * Remove telemetry monitor.
-       */
-
-      if (
-        telemetrySubscriptionRef.current
-      ) {
-
-        telemetrySubscriptionRef
-          .current
-          .remove();
-
-        telemetrySubscriptionRef
-          .current = null;
-
-      }
-
-
-      /*
-       * Disconnect BLE device.
-       */
-
-      if (device) {
-
-        try {
-
-          await manager?.cancelDeviceConnection(
-            device.id
-          );
-
-        } catch (error) {
-
-          console.log(
-            'Disconnect error:',
-            error
-          );
-
+                  if (hr !== null) {
+                    setHeartRate(hr);
+                    recordHeartRate(hr);
+                  }
+                }
+              );
         }
-
       }
 
-
       /*
-       * Reset UI.
+       * ========================================================
+       * BATTERY / TELEMETRY
+       * ========================================================
        */
 
-      setDevice(null);
-
-      setBattery(null);
-
-      setTelemetry(
-        'No sensor data yet'
-      );
-
-      setStatus(
-        'Ready to scan'
-      );
-
-
-      /*
-       * Clear duplicate device cache.
-       */
-
-      seenDevicesRef.current.clear();
-    };
-
-
-  /*
-   * ==========================================================
-   * CONNECT TO RING
-   * ==========================================================
-   */
-
-  const connectToRing =
-    async (
-      scanned: Device
-    ) => {
-
-      /*
-       * Prevent duplicate connection.
-       */
-
-      if (
-        isConnectingRef.current
-      ) {
-
-        return;
-
-      }
-
-
-      isConnectingRef.current =
-        true;
-
-
-      const displayName =
-        scanned.name ||
-        scanned.localName ||
-        RING_NAME;
-
-
-      try {
-
-        /*
-         * Connect.
-         */
-
-        console.log(
-          'Connecting to ring:',
-          displayName,
-          scanned.id
-        );
-
-
-        setStatus(
-          `Connecting to ${displayName}...`
-        );
-
-
-        const connected =
-          await scanned.connect();
-
-
-        /*
-         * Discover GATT.
-         */
-
-        await connected
-          .discoverAllServicesAndCharacteristics();
-
-
-        /*
-         * Save device.
-         */
-
-        setDevice(
-          connected
-        );
-
-
-        setStatus(
-          `Connected to ${
-            connected.name ||
-            RING_NAME
-          }`
-        );
-
-
-        console.log(
-          'Connected device:',
-          connected.id
-        );
-
-
-        /*
-         * ====================================================
-         * SERVICES
-         * ====================================================
-         */
-
-        const services =
-          await connected.services();
-
-
-        console.log(
-          'BLE SERVICES:',
-          services.map(
-            service =>
-              service.uuid
-          )
-        );
-
-
-        /*
-         * ====================================================
-         * CHARACTERISTICS
-         * ====================================================
-         */
-
-        for (
-          const service of services
-        ) {
-
-          try {
-
-            const characteristics =
-              await connected
-                .characteristicsForService(
-                  service.uuid
-                );
-
-
-            console.log(
-              `CHARACTERISTICS FOR ${service.uuid}:`,
-              characteristics.map(
-                characteristic => ({
-                  uuid:
-                    characteristic.uuid,
-
-                  isReadable:
-                    characteristic.isReadable,
-
-                  isWritableWithResponse:
-                    characteristic
-                      .isWritableWithResponse,
-
-                  isWritableWithoutResponse:
-                    characteristic
-                      .isWritableWithoutResponse,
-
-                  isNotifiable:
-                    characteristic.isNotifiable,
-
-                  isIndicatable:
-                    characteristic.isIndicatable,
-                })
-              )
-            );
-
-          } catch (
-            characteristicError
-          ) {
-
-            console.log(
-              'Characteristic discovery error:',
-              characteristicError
-            );
-
-          }
-
-        }
-
-
-        /*
-         * ====================================================
-         * BATTERY / TELEMETRY MONITOR
-         * ====================================================
-         */
-
-        console.log(
-          'Starting telemetry monitor:',
-          TELEMETRY_CHARACTERISTIC
-        );
-
-
-        /*
-         * Remove old monitor first.
-         */
-
-        if (
-          telemetrySubscriptionRef.current
-        ) {
-
-          telemetrySubscriptionRef
-            .current
-            .remove();
-
-          telemetrySubscriptionRef
-            .current = null;
-
-        }
-
-
-        telemetrySubscriptionRef.current =
-          connected.monitorCharacteristicForService(
+      batterySubscriptionRef.current?.remove();
+
+      batterySubscriptionRef.current =
+        discoveredDevice
+          .monitorCharacteristicForService(
             DATA_SERVICE,
             TELEMETRY_CHARACTERISTIC,
-
-            (
-              monitorError,
-              characteristic
-            ) => {
-
-              /*
-               * Notification error.
-               */
-
-              if (
-                monitorError
-              ) {
-
+            (error, characteristic) => {
+              if (error) {
                 console.log(
-                  'Telemetry monitor error:',
-                  monitorError
-                );
-
-                setTelemetry(
-                  `ERROR: ${monitorError.message}`
+                  'Battery notification error:',
+                  error
                 );
 
                 return;
               }
 
-
-              /*
-               * Characteristic missing.
-               */
-
-              if (
-                !characteristic
-              ) {
-
-                console.log(
-                  'Telemetry notification returned no characteristic'
-                );
-
+              if (!characteristic?.value) {
                 return;
               }
 
-
-              /*
-               * Value missing.
-               */
-
-              if (
-                !characteristic.value
-              ) {
-
-                console.log(
-                  'Telemetry characteristic has no value'
-                );
-
-                return;
-              }
-
-
-              /*
-               * =================================================
-               * RAW BLE DATA
-               * =================================================
-               */
-
               console.log(
-                '================================'
-              );
-
-
-              console.log(
-                'BLE TELEMETRY UUID:',
-                characteristic.uuid
-              );
-
-
-              console.log(
-                'BLE TELEMETRY BASE64:',
+                'Battery telemetry:',
                 characteristic.value
               );
 
-
-              /*
-               * =================================================
-               * BATTERY CONVERSION
-               * =================================================
-               */
-
-              const batteryValue =
+              const decoded =
                 decodeBattery(
                   characteristic.value
                 );
 
-
-              console.log(
-                'BLE BATTERY RESULT:',
-                batteryValue
-              );
-
-
-              /*
-               * Update battery UI.
-               */
-
-              if (
-                batteryValue !== null
-              ) {
-
-                console.log(
-                  'BATTERY VALUE:',
-                  batteryValue,
-                  '%'
-                );
-
-
-                setBattery(
-                  batteryValue
-                );
-
-              } else {
-
-                console.log(
-                  'Could not interpret notification as battery.'
-                );
-
+              if (decoded !== null) {
+                setBattery(decoded);
               }
 
+              setTelemetry(
+                characteristic.value
+              );
 
-              /*
-               * =================================================
-               * TELEMETRY DISPLAY
-               * =================================================
-               */
-
-              const decodedTelemetry =
+              const telemetryValue =
                 decodeTelemetry(
                   characteristic.value
                 );
 
-
-              console.log(
-                'BLE TELEMETRY DECODED:',
-                decodedTelemetry
-              );
-
-
-              setTelemetry(
-                decodedTelemetry
-              );
-
-
-              console.log(
-                '================================'
-              );
-
+              if (
+                telemetryValue !== null
+              ) {
+                setBattery(
+                  telemetryValue
+                );
+              }
             }
           );
 
+      const finalConnection =
+        await discoveredDevice.isConnected();
 
-      } catch (
-        connectionError
-      ) {
-
-        console.log(
-          'Connection error:',
-          connectionError
+      if (!finalConnection) {
+        throw new Error(
+          'Connection lost after service discovery'
         );
-
-
-        setStatus(
-          connectionError instanceof Error
-            ? connectionError.message
-            : 'Connection failed'
-        );
-
-
-        /*
-         * If connection failed,
-         * allow another attempt.
-         */
-
-        isConnectingRef.current =
-          false;
-
       }
 
-    };
-
-
-  /*
-   * ==========================================================
-   * SCAN + CONNECT
-   * ==========================================================
-   */
-
-  const scanAndConnect =
-    async () => {
-
-      /*
-       * Already connected:
-       * button becomes Disconnect.
-       */
-
-      if (device) {
-
-        await disconnectDevice();
-
-        return;
-      }
-
-
-      /*
-       * BLE unavailable on web.
-       */
-
-      if (!manager) {
-
-        setStatus(
-          'BLE is available in the Android/iOS build'
-        );
-
-        return;
-
-      }
-
-
-      /*
-       * Already scanning.
-       */
-
-      if (
-        isScanningRef.current
-      ) {
-
-        console.log(
-          'Scan already running.'
-        );
-
-        return;
-
-      }
-
-
-      /*
-       * Already connecting.
-       */
-
-      if (
-        isConnectingRef.current
-      ) {
-
-        console.log(
-          'Connection already in progress.'
-        );
-
-        return;
-
-      }
-
-
-      /*
-       * ======================================================
-       * ANDROID PERMISSIONS
-       * ======================================================
-       */
-
-      if (
-        Platform.OS === 'android'
-      ) {
-
-        const apiLevel =
-          Platform.Version;
-
-
-        /*
-         * Android 12+
-         */
-
-        if (
-          typeof apiLevel === 'number' &&
-          apiLevel >= 31
-        ) {
-
-          const result =
-            await PermissionsAndroid
-              .requestMultiple([
-                PermissionsAndroid
-                  .PERMISSIONS
-                  .BLUETOOTH_SCAN,
-
-                PermissionsAndroid
-                  .PERMISSIONS
-                  .BLUETOOTH_CONNECT,
-
-                PermissionsAndroid
-                  .PERMISSIONS
-                  .ACCESS_FINE_LOCATION,
-              ]);
-
-
-          const scanGranted =
-            result[
-              'android.permission.BLUETOOTH_SCAN'
-            ] ===
-            PermissionsAndroid.RESULTS.GRANTED;
-
-
-          const connectGranted =
-            result[
-              'android.permission.BLUETOOTH_CONNECT'
-            ] ===
-            PermissionsAndroid.RESULTS.GRANTED;
-
-
-          if (
-            !scanGranted ||
-            !connectGranted
-          ) {
-
-            setStatus(
-              'Bluetooth permissions denied'
-            );
-
-
-            Alert.alert(
-              'Permission required',
-              'Please allow Bluetooth permissions to scan for the ring.'
-            );
-
-
-            return;
-          }
-
-
-        } else {
-
-          /*
-           * Android < 12
-           */
-
-          const granted =
-            await PermissionsAndroid
-              .request(
-                PermissionsAndroid
-                  .PERMISSIONS
-                  .ACCESS_FINE_LOCATION
-              );
-
-
-          if (
-            granted !==
-            PermissionsAndroid.RESULTS.GRANTED
-          ) {
-
-            setStatus(
-              'Location permission denied'
-            );
-
-            return;
-
-          }
-
-        }
-
-      }
-
-
-      /*
-       * ======================================================
-       * RESET SCAN CACHE
-       * ======================================================
-       */
-
-      seenDevicesRef.current.clear();
-
-
-      /*
-       * ======================================================
-       * START SCAN
-       * ======================================================
-       */
-
-      isScanningRef.current =
-        true;
-
-
-      setStatus(
-        'Scanning for DLG-PRPH...'
-      );
-
-
+      setStatus('Connected');
+    } catch (error) {
       console.log(
-        '================================'
+        'Connection failed:',
+        error
       );
 
+      clearSubscriptions();
 
-      console.log(
-        'Starting BLE scan...'
-      );
-
+      setDevice(null);
+      setBattery(null);
+      setHeartRate(null);
+      setTelemetry(null);
 
       /*
        * IMPORTANT:
-       *
-       * allowDuplicates = false
-       *
-       * This prevents the same BLE device
-       * from being reported repeatedly.
+       * Keep previous HR history even if
+       * a new connection attempt fails.
        */
+
+      setStatus('Connection failed');
+
+      Alert.alert(
+        'Connection failed',
+        'Could not connect to the SR08 ring.'
+      );
+    } finally {
+      connectingRef.current = false;
+    }
+  };
+
+  /*
+   * ============================================================
+   * SCAN
+   * ============================================================
+   */
+
+  const scanForRing = async () => {
+    if (
+      scanningRef.current ||
+      connectingRef.current
+    ) {
+      return;
+    }
+
+    try {
+      if (Platform.OS === 'android') {
+        const granted =
+          await PermissionsAndroid.requestMultiple(
+            [
+              PermissionsAndroid.PERMISSIONS
+                .BLUETOOTH_SCAN,
+              PermissionsAndroid.PERMISSIONS
+                .BLUETOOTH_CONNECT,
+            ]
+          );
+
+        const scanGranted =
+          granted[
+            PermissionsAndroid.PERMISSIONS
+              .BLUETOOTH_SCAN
+          ] ===
+          PermissionsAndroid.RESULTS
+            .GRANTED;
+
+        const connectGranted =
+          granted[
+            PermissionsAndroid.PERMISSIONS
+              .BLUETOOTH_CONNECT
+          ] ===
+          PermissionsAndroid.RESULTS
+            .GRANTED;
+
+        if (
+          !scanGranted ||
+          !connectGranted
+        ) {
+          Alert.alert(
+            'Bluetooth permission required',
+            'Please allow Bluetooth permissions to connect to the ring.'
+          );
+
+          return;
+        }
+      }
+
+      const manager = managerRef.current;
+
+      const state =
+        await manager.state();
+
+      if (state !== State.PoweredOn) {
+        Alert.alert(
+          'Bluetooth unavailable',
+          'Please turn on Bluetooth and try again.'
+        );
+
+        return;
+      }
+
+      scanningRef.current = true;
+      seenDevicesRef.current.clear();
+
+      setStatus('Scanning...');
 
       manager.startDeviceScan(
         null,
         {
           allowDuplicates: false,
         },
-
-        async (
-          error,
-          scanned
-        ) => {
-
-          /*
-           * Scan error.
-           */
-
+        (error, scannedDevice) => {
           if (error) {
-
             console.log(
-              'BLE scan error:',
+              'Scan error:',
               error
             );
 
-
+            scanningRef.current = false;
             manager.stopDeviceScan();
 
-
-            isScanningRef.current =
-              false;
-
-
-            setStatus(
-              error.message
-            );
-
+            setStatus('Scan failed');
 
             return;
           }
 
-
-          /*
-           * No device.
-           */
-
-          if (!scanned) {
+          if (!scannedDevice) {
             return;
           }
-
-
-          /*
-           * ==================================================
-           * DUPLICATE DEVICE FILTER
-           * ==================================================
-           */
 
           if (
             seenDevicesRef.current.has(
-              scanned.id
+              scannedDevice.id
             )
           ) {
-
             return;
-
           }
-
 
           seenDevicesRef.current.add(
-            scanned.id
+            scannedDevice.id
           );
-
-
-          /*
-           * Device name.
-           */
-
-          const localName =
-            scanned.name ||
-            scanned.localName ||
-            '';
-
-
-          /*
-           * ==================================================
-           * ONLY LOG DEVICES WE CARE ABOUT
-           * ==================================================
-           *
-           * This means your console will not get spammed
-           * with random Bluetooth devices.
-           */
-
-          const nameMatches =
-            localName
-              .toLowerCase()
-              .includes(
-                RING_NAME.toLowerCase()
-              );
-
-
-          const macMatches =
-            scanned.id
-              .toUpperCase()
-              .startsWith(
-                RING_MAC_PREFIX
-              );
-
-
-          /*
-           * Ignore unrelated devices.
-           *
-           * Therefore:
-           *
-           * DEKSTOP-DION
-           *
-           * will not be printed.
-           */
-
-          if (
-            !nameMatches &&
-            !macMatches
-          ) {
-
-            return;
-
-          }
-
-
-          /*
-           * ==================================================
-           * RING FOUND
-           * ==================================================
-           */
 
           console.log(
-            'FOUND SR08 RING:',
-            localName || RING_NAME,
-            scanned.id
+            'Found:',
+            scannedDevice.name,
+            scannedDevice.id
           );
 
+          const nameMatches =
+            scannedDevice.name ===
+              RING_NAME ||
+            scannedDevice.localName ===
+              RING_NAME;
 
-          /*
-           * Stop scanning immediately.
-           */
+          const macMatches =
+            scannedDevice.id
+              .toUpperCase()
+              .startsWith(
+                RING_MAC_PREFIX.toUpperCase()
+              );
 
           if (
-            isScanningRef.current
+            nameMatches ||
+            macMatches
           ) {
-
-            isScanningRef.current =
-              false;
+            scanningRef.current = false;
 
             manager.stopDeviceScan();
 
+            connectToRing(
+              scannedDevice
+            );
           }
-
-
-          /*
-           * Connect.
-           */
-
-          await connectToRing(
-            scanned
-          );
-
         }
       );
 
-    };
+      setTimeout(() => {
+        if (scanningRef.current) {
+          scanningRef.current = false;
 
+          manager.stopDeviceScan();
+
+          setStatus('Disconnected');
+        }
+      }, 10000);
+    } catch (error) {
+      console.log(
+        'Scan failed:',
+        error
+      );
+
+      scanningRef.current = false;
+
+      managerRef.current.stopDeviceScan();
+
+      setStatus('Scan failed');
+    }
+  };
 
   /*
-   * ==========================================================
-   * WRITE VALUE
-   * ==========================================================
+   * ============================================================
+   * HEART RATE STATISTICS
+   * ============================================================
    */
 
-  const writeValue =
-    async (
-      characteristic: string,
-      value: string
-    ) => {
+  const heartRateStats = useMemo(() => {
+    if (
+      heartRateReadings.length === 0
+    ) {
+      return {
+        average: null,
+        minimum: null,
+        maximum: null,
+      };
+    }
 
-      /*
-       * Not connected.
-       */
+    const values =
+      heartRateReadings.map(
+        (reading) => reading.value
+      );
 
-      if (!device) {
+    const total =
+      values.reduce(
+        (sum, value) =>
+          sum + value,
+        0
+      );
 
-        Alert.alert(
-          'Not connected',
-          'Connect to the ring first.'
-        );
-
-        return;
-
-      }
-
-
-      /*
-       * Empty value.
-       */
-
-      if (!value) {
-
-        Alert.alert(
-          'No value',
-          'Enter a value first.'
-        );
-
-        return;
-
-      }
-
-
-      try {
-
-        console.log(
-          'Writing:',
-          value
-        );
-
-
-        console.log(
-          'Characteristic:',
-          characteristic
-        );
-
-
-        await device
-          .writeCharacteristicWithResponseForService(
-            DATA_SERVICE,
-            characteristic,
-            encode(value)
-          );
-
-
-        console.log(
-          'Write successful'
-        );
-
-
-        setStatus(
-          `Sent ${value}`
-        );
-
-
-      } catch (error) {
-
-        console.log(
-          'Write failed:',
-          error
-        );
-
-
-        Alert.alert(
-          'Write failed',
-          error instanceof Error
-            ? error.message
-            : 'The ring rejected the value.'
-        );
-
-      }
-
+    return {
+      average: Math.round(
+        total / values.length
+      ),
+      minimum: Math.min(
+        ...values
+      ),
+      maximum: Math.max(
+        ...values
+      ),
     };
-
+  }, [heartRateReadings]);
 
   /*
-   * ==========================================================
-   * THEME
-   * ==========================================================
+   * ============================================================
+   * GRAPH
+   * ============================================================
    */
 
-  const currentTheme =
-    isDarkMode
-      ? darkStyles
-      : lightStyles;
+  const graphData = useMemo(() => {
+    const readings =
+      heartRateReadings.slice(-30);
 
+    if (
+      readings.length === 0 ||
+      graphWidth <= 0
+    ) {
+      return null;
+    }
+
+    const chartHeight = 190;
+
+    const leftPadding = 38;
+    const rightPadding = 12;
+    const topPadding = 18;
+    const bottomPadding = 24;
+
+    const plotWidth =
+      graphWidth -
+      leftPadding -
+      rightPadding;
+
+    const plotHeight =
+      chartHeight -
+      topPadding -
+      bottomPadding;
+
+    const values =
+      readings.map(
+        (reading) =>
+          reading.value
+      );
+
+    let minValue =
+      Math.min(...values);
+
+    let maxValue =
+      Math.max(...values);
+
+    if (
+      minValue === maxValue
+    ) {
+      minValue -= 10;
+      maxValue += 10;
+    }
+
+    const range =
+      maxValue - minValue;
+
+    const points =
+      readings.map(
+        (reading, index) => {
+          const x =
+            readings.length === 1
+              ? leftPadding +
+                plotWidth / 2
+              : leftPadding +
+                (index /
+                  (readings.length -
+                    1)) *
+                  plotWidth;
+
+          const normalized =
+            (reading.value -
+              minValue) /
+            range;
+
+          const y =
+            topPadding +
+            (1 - normalized) *
+              plotHeight;
+
+          return {
+            x,
+            y,
+            value: reading.value,
+          };
+        }
+      );
+
+    return {
+      points,
+      minValue,
+      maxValue,
+      chartHeight,
+      leftPadding,
+      topPadding,
+      plotWidth,
+      plotHeight,
+    };
+  }, [
+    heartRateReadings,
+    graphWidth,
+  ]);
+
+  const formatTime = (
+    timestamp: number
+  ) => {
+    return new Date(
+      timestamp
+    ).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  };
 
   /*
-   * ==========================================================
+   * ============================================================
    * UI
-   * ==========================================================
+   * ============================================================
    */
 
   return (
-
     <SafeAreaView
-      style={[
-        styles.safe,
-        currentTheme.safe
-      ]}
+      style={styles.safeArea}
     >
-
-      <ScrollView
-        contentContainerStyle={
-          styles.container
-        }
-      >
-
-        {/* ==================================================
-            HEADER
-        ================================================== */}
-
-        <View
-          style={styles.header}
-        >
-
-          <Text
-            style={[
-              styles.kicker,
-              currentTheme.kicker
-            ]}
-          >
-            SR08 / COMPANION
-          </Text>
-
-
-          <View
-            style={styles.titleRow}
-          >
-
-            <Text
-              style={[
-                styles.title,
-                currentTheme.title
-              ]}
-            >
-              Your ring, in rhythm.
-            </Text>
-
-
-            <Pressable
-              style={[
-                styles.themeToggle,
-                currentTheme.themeToggle
-              ]}
-              onPress={() =>
-                setIsDarkMode(
-                  !isDarkMode
-                )
-              }
-            >
-
-              <Text
-                style={[
-                  styles.themeToggleText,
-                  currentTheme.themeToggleText
-                ]}
-              >
-                {isDarkMode
-                  ? '☀️ Light'
-                  : '🌙 Dark'}
-              </Text>
-
-            </Pressable>
-
-          </View>
-
-
-          <Text
-            style={[
-              styles.subtitle,
-              currentTheme.subtitle
-            ]}
-          >
-            A quiet control surface for the
-            hardware on your finger.
-          </Text>
-
-        </View>
-
-
-        {/* ==================================================
-            CONNECTION
-        ================================================== */}
-
-        <View
-          style={[
-            styles.connectionCard,
-            currentTheme.connectionCard
-          ]}
-        >
-
-          <View>
-
-            <Text
-              style={[
-                styles.label,
-                currentTheme.label
-              ]}
-            >
-              DEVICE
-            </Text>
-
-
-            <Text
-              style={[
-                styles.statusText,
-                currentTheme.statusText
-              ]}
-            >
-              {
-                device
-                  ? `Connected (${
-                      device.name ||
-                      RING_NAME
-                    })`
-                  : status
-              }
-            </Text>
-
-          </View>
-
-
-          <Pressable
-            style={[
-              styles.primaryButton,
-              currentTheme.primaryButton,
-
-              device &&
-              (
-                isDarkMode
-                  ? styles.disconnectButtonDark
-                  : styles.disconnectButtonLight
-              )
-            ]}
-            onPress={scanAndConnect}
-          >
-
-            <Text
-              style={[
-                styles.buttonText,
-                currentTheme.buttonText
-              ]}
-            >
-              {
-                device
-                  ? 'Disconnect'
-                  : 'Scan ring'
-              }
-            </Text>
-
-          </Pressable>
-
-        </View>
-
-
-        {/* ==================================================
-            BATTERY
-        ================================================== */}
-
-        <View
-          style={[
-            styles.batteryCard,
-            currentTheme.batteryCard
-          ]}
-        >
-
-          <View
-            style={styles.cardHeader}
-          >
-
-            <Text
-              style={[
-                styles.label,
-                currentTheme.label
-              ]}
-            >
-              BATTERY
-            </Text>
-
-
-            <Text
-              style={[
-                styles.batteryValue,
-                currentTheme.batteryValue
-              ]}
-            >
-
-              {
-                battery === null
-                  ? '--'
-                  : battery
-              }
-
-              <Text
-                style={[
-                  styles.percent,
-                  currentTheme.percent
-                ]}
-              >
-                %
-              </Text>
-
-            </Text>
-
-          </View>
-
-
-          <View
-            style={[
-              styles.batteryBarBackground,
-              currentTheme.batteryBarBackground
-            ]}
-          >
-
-            <View
-              style={[
-                styles.batteryFill,
-                currentTheme.batteryFill,
-                {
-                  width:
-                    `${battery ?? 0}%`
-                }
-              ]}
-            />
-
-          </View>
-
-        </View>
-
-
-        {/* ==================================================
-            RING CONTROLS
-        ================================================== */}
-
-        <Text
-          style={[
-            styles.sectionTitle,
-            currentTheme.sectionTitle
-          ]}
-        >
-          Ring controls
-        </Text>
-
-
-        {/* DIGIT */}
-
-        <View
-          style={[
-            styles.controlCard,
-            currentTheme.controlCard
-          ]}
-        >
-
-          <View
-            style={styles.controlHeader}
-          >
-
-            <Text
-              style={[
-                styles.controlTitle,
-                currentTheme.controlTitle
-              ]}
-            >
-              Send one digit
-            </Text>
-
-
-            <Text
-              style={[
-                styles.characterCount,
-                currentTheme.characterCount
-              ]}
-            >
-              1 / 1
-            </Text>
-
-          </View>
-
-
-          <View
-            style={styles.inputRow}
-          >
-
-            <TextInput
-              value={digit}
-
-              onChangeText={
-                (value) =>
-                  setDigit(
-                    value
-                      .replace(
-                        /[^0-9]/g,
-                        ''
-                      )
-                      .slice(
-                        0,
-                        1
-                      )
-                  )
-              }
-
-              keyboardType="number-pad"
-
-              maxLength={1}
-
-              style={[
-                styles.input,
-                currentTheme.input
-              ]}
-            />
-
-
-            <Pressable
-              style={[
-                styles.secondaryButton,
-                currentTheme.secondaryButton
-              ]}
-              onPress={() =>
-                writeValue(
-                  DIGIT_CHARACTERISTIC,
-                  digit
-                )
-              }
-            >
-
-              <Text
-                style={[
-                  styles.secondaryText,
-                  currentTheme.secondaryText
-                ]}
-              >
-                Send
-              </Text>
-
-            </Pressable>
-
-          </View>
-
-        </View>
-
-
-        {/* LETTER */}
-
-        <View
-          style={[
-            styles.controlCard,
-            currentTheme.controlCard
-          ]}
-        >
-
-          <View
-            style={styles.controlHeader}
-          >
-
-            <Text
-              style={[
-                styles.controlTitle,
-                currentTheme.controlTitle
-              ]}
-            >
-              Send one letter
-            </Text>
-
-
-            <Text
-              style={[
-                styles.characterCount,
-                currentTheme.characterCount
-              ]}
-            >
-              1 / 1
-            </Text>
-
-          </View>
-
-
-          <View
-            style={styles.inputRow}
-          >
-
-            <TextInput
-              value={letter}
-
-              onChangeText={
-                (value) =>
-                  setLetter(
-                    value
-                      .replace(
-                        /[^a-z]/gi,
-                        ''
-                      )
-                      .slice(
-                        0,
-                        1
-                      )
-                      .toUpperCase()
-                  )
-              }
-
-              maxLength={1}
-
-              autoCapitalize="characters"
-
-              style={[
-                styles.input,
-                currentTheme.input
-              ]}
-            />
-
-
-            <Pressable
-              style={[
-                styles.secondaryButton,
-                currentTheme.secondaryButton
-              ]}
-              onPress={() =>
-                writeValue(
-                  LETTER_CHARACTERISTIC,
-                  letter
-                )
-              }
-            >
-
-              <Text
-                style={[
-                  styles.secondaryText,
-                  currentTheme.secondaryText
-                ]}
-              >
-                Send
-              </Text>
-
-            </Pressable>
-
-          </View>
-
-        </View>
-
-
-        {/* ==================================================
-            COMING ONLINE
-        ================================================== */}
-
-        <Text
-          style={[
-            styles.sectionTitle,
-            currentTheme.sectionTitle
-          ]}
-        >
-          Coming online
-        </Text>
-
-
-        <View
-          style={[
-            styles.futureRow,
-            currentTheme.futureRow
-          ]}
-        >
-
-          <View>
-
-            <Text
-              style={[
-                styles.futureTitle,
-                currentTheme.futureTitle
-              ]}
-            >
-              Heart rate
-            </Text>
-
-
-            <Text
-              style={[
-                styles.futureText,
-                currentTheme.futureText
-              ]}
-            >
-              Sensor stream will appear here
-            </Text>
-
-          </View>
-
-
-          <Text
-            style={[
-              styles.futureValue,
-              currentTheme.futureValue
-            ]}
-          >
-            -- BPM
-          </Text>
-
-        </View>
-
-
-        <View
-          style={[
-            styles.futureRow,
-            currentTheme.futureRow
-          ]}
-        >
-
-          <View>
-
-            <Text
-              style={[
-                styles.futureTitle,
-                currentTheme.futureTitle
-              ]}
-            >
-              Sleep timer
-            </Text>
-
-
-            <Text
-              style={[
-                styles.futureText,
-                currentTheme.futureText
-              ]}
-            >
-              Overnight state tracking
-            </Text>
-
-          </View>
-
-
-          <Text
-            style={[
-              styles.futureValue,
-              currentTheme.futureValue
-            ]}
-          >
-            --:--
-          </Text>
-
-        </View>
-
-
-        {/* ==================================================
-            LIVE TELEMETRY
-        ================================================== */}
-
-        <Text
-          style={[
-            styles.telemetry,
-            currentTheme.telemetry
-          ]}
-        >
-          LIVE TELEMETRY: {telemetry}
-        </Text>
-
-      </ScrollView>
-
-
       <StatusBar
         style={
           isDarkMode
@@ -2169,418 +1018,1423 @@ export default function App() {
         }
       />
 
+      <View
+        style={styles.container}
+      >
+        <ScrollView
+          contentContainerStyle={
+            styles.scrollContent
+          }
+          showsVerticalScrollIndicator={
+            false
+          }
+        >
+          {/* HEADER */}
+
+          <View
+            style={styles.header}
+          >
+            <View>
+              <Text
+                style={styles.brand}
+              >
+                SR08 / COMPANION
+              </Text>
+
+              <Text
+                style={styles.tagline}
+              >
+                Your ring, in rhythm.
+              </Text>
+            </View>
+
+            <Pressable
+              style={
+                styles.themeButton
+              }
+              onPress={() =>
+                setIsDarkMode(
+                  (previous) =>
+                    !previous
+                )
+              }
+            >
+              <Text
+                style={
+                  styles.themeButtonText
+                }
+              >
+                {isDarkMode
+                  ? '☀'
+                  : '☾'}
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* TABS */}
+
+          <View
+            style={
+              styles.tabContainer
+            }
+          >
+            <Pressable
+              style={[
+                styles.tab,
+                activeTab ===
+                  'home' &&
+                  styles.activeTab,
+              ]}
+              onPress={() =>
+                setActiveTab(
+                  'home'
+                )
+              }
+            >
+              <Text
+                style={[
+                  styles.tabText,
+                  activeTab ===
+                    'home' &&
+                    styles.activeTabText,
+                ]}
+              >
+                Home
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.tab,
+                activeTab ===
+                  'heartRate' &&
+                  styles.activeTab,
+              ]}
+              onPress={() =>
+                setActiveTab(
+                  'heartRate'
+                )
+              }
+            >
+              <Text
+                style={[
+                  styles.tabText,
+                  activeTab ===
+                    'heartRate' &&
+                    styles.activeTabText,
+                ]}
+              >
+                Heart Rate
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* ==================================================
+              HOME
+              ================================================== */}
+
+          {activeTab === 'home' && (
+            <>
+              {/* DEVICE */}
+
+              <View
+                style={styles.card}
+              >
+                <View
+                  style={
+                    styles.cardHeader
+                  }
+                >
+                  <View>
+                    <Text
+                      style={
+                        styles.sectionLabel
+                      }
+                    >
+                      DEVICE
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.deviceName
+                      }
+                    >
+                      {device?.name ||
+                        RING_NAME}
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.statusDot,
+                      status ===
+                        'Connected' &&
+                        styles.statusDotConnected,
+                    ]}
+                  />
+                </View>
+
+                <Text
+                  style={
+                    styles.statusText
+                  }
+                >
+                  {status}
+                </Text>
+
+                <Pressable
+                  style={[
+                    styles.primaryButton,
+                    status ===
+                      'Connected' &&
+                      styles.disconnectButton,
+                  ]}
+                  onPress={
+                    status ===
+                    'Connected'
+                      ? disconnectFromRing
+                      : scanForRing
+                  }
+                >
+                  <Text
+                    style={
+                      styles.primaryButtonText
+                    }
+                  >
+                    {status ===
+                    'Connected'
+                      ? 'Disconnect'
+                      : 'Connect to ring'}
+                  </Text>
+                </Pressable>
+              </View>
+
+              {/* BATTERY */}
+
+              <View
+                style={styles.card}
+              >
+                <View
+                  style={
+                    styles.cardHeader
+                  }
+                >
+                  <Text
+                    style={
+                      styles.sectionLabel
+                    }
+                  >
+                    BATTERY
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.batteryValue
+                    }
+                  >
+                    {battery !==
+                    null
+                      ? `${battery}%`
+                      : '--'}
+                  </Text>
+                </View>
+
+                <View
+                  style={
+                    styles.batteryTrack
+                  }
+                >
+                  <View
+                    style={[
+                      styles.batteryFill,
+                      {
+                        width:
+                          battery !==
+                          null
+                            ? `${Math.max(
+                                0,
+                                Math.min(
+                                  100,
+                                  battery
+                                )
+                              )}%`
+                            : '0%',
+                      },
+                    ]}
+                  />
+                </View>
+
+                <Text
+                  style={
+                    styles.mutedText
+                  }
+                >
+                  {battery !==
+                  null
+                    ? 'Battery level'
+                    : 'Waiting for telemetry'}
+                </Text>
+              </View>
+
+              {/* LIVE HEART RATE */}
+
+              <View
+                style={styles.card}
+              >
+                <View
+                  style={
+                    styles.cardHeader
+                  }
+                >
+                  <View>
+                    <Text
+                      style={
+                        styles.sectionLabel
+                      }
+                    >
+                      HEART RATE
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.featureTitle
+                      }
+                    >
+                      Live measurement
+                    </Text>
+                  </View>
+
+                  <Text
+                    style={
+                      styles.heartIcon
+                    }
+                  >
+                    ♥
+                  </Text>
+                </View>
+
+                <View
+                  style={
+                    styles.liveHrRow
+                  }
+                >
+                  <Text
+                    style={
+                      styles.liveHrValue
+                    }
+                  >
+                    {heartRate !==
+                    null
+                      ? heartRate
+                      : '--'}
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.liveHrUnit
+                    }
+                  >
+                    BPM
+                  </Text>
+                </View>
+
+                <View
+                  style={[
+                    styles.homeHrStatus,
+                    styles[
+                      `statusBackground_${hrStatus.level}`
+                    ],
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.homeHrStatusDot,
+                      styles[
+                        `statusDot_${hrStatus.level}`
+                      ],
+                    ]}
+                  />
+
+                  <Text
+                    style={[
+                      styles.homeHrStatusText,
+                      styles[
+                        `statusText_${hrStatus.level}`
+                      ],
+                    ]}
+                  >
+                    {hrStatus.label}
+                  </Text>
+                </View>
+
+                <Text
+                  style={
+                    styles.mutedText
+                  }
+                >
+                  {heartRate !==
+                  null
+                    ? hrStatus.description
+                    : 'Waiting for heart rate data'}
+                </Text>
+
+                <Pressable
+                  style={
+                    styles.secondaryButton
+                  }
+                  onPress={() =>
+                    setActiveTab(
+                      'heartRate'
+                    )
+                  }
+                >
+                  <Text
+                    style={
+                      styles.secondaryButtonText
+                    }
+                  >
+                    View heart rate analysis
+                  </Text>
+                </Pressable>
+              </View>
+
+              {/* COMING ONLINE */}
+
+              <Text
+                style={
+                  styles.sectionHeading
+                }
+              >
+                COMING ONLINE
+              </Text>
+
+              <View
+                style={
+                  styles.featureCard
+                }
+              >
+                <View
+                  style={
+                    styles.featureIconBox
+                  }
+                >
+                  <Text
+                    style={
+                      styles.featureIcon
+                    }
+                  >
+                    ♥
+                  </Text>
+                </View>
+
+                <View
+                  style={
+                    styles.featureContent
+                  }
+                >
+                  <Text
+                    style={
+                      styles.featureTitle
+                    }
+                  >
+                    Heart rate
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.featureDescription
+                    }
+                  >
+                    Continuous heart rate
+                    monitoring and analysis.
+                  </Text>
+                </View>
+
+                <View
+                  style={
+                    styles.liveBadge
+                  }
+                >
+                  <Text
+                    style={
+                      styles.liveBadgeText
+                    }
+                  >
+                    LIVE
+                  </Text>
+                </View>
+              </View>
+
+              <View
+                style={
+                  styles.featureCard
+                }
+              >
+                <View
+                  style={
+                    styles.featureIconBox
+                  }
+                >
+                  <Text
+                    style={
+                      styles.featureIcon
+                    }
+                  >
+                    ◷
+                  </Text>
+                </View>
+
+                <View
+                  style={
+                    styles.featureContent
+                  }
+                >
+                  <Text
+                    style={
+                      styles.featureTitle
+                    }
+                  >
+                    Sleep timer
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.featureDescription
+                    }
+                  >
+                    Sleep tracking will be
+                    available soon.
+                  </Text>
+                </View>
+
+                <View
+                  style={
+                    styles.soonBadge
+                  }
+                >
+                  <Text
+                    style={
+                      styles.soonBadgeText
+                    }
+                  >
+                    SOON
+                  </Text>
+                </View>
+              </View>
+
+              {telemetry !==
+                null && (
+                <View
+                  style={
+                    styles.telemetryCard
+                  }
+                >
+                  <Text
+                    style={
+                      styles.sectionLabel
+                    }
+                  >
+                    RAW TELEMETRY
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.telemetryValue
+                    }
+                  >
+                    {telemetry}
+                  </Text>
+                </View>
+              )}
+            </>
+          )}
+
+          {/* ==================================================
+              HEART RATE
+              ================================================== */}
+
+          {activeTab ===
+            'heartRate' && (
+            <>
+              <View
+                style={
+                  styles.analysisHeader
+                }
+              >
+                <Text
+                  style={
+                    styles.analysisTitle
+                  }
+                >
+                  Heart rate analysis
+                </Text>
+
+                <Text
+                  style={
+                    styles.analysisSubtitle
+                  }
+                >
+                  Live monitoring and range alerts
+                </Text>
+              </View>
+
+              {/* CURRENT */}
+
+              <View
+                style={
+                  styles.hrHeroCard
+                }
+              >
+                <Text
+                  style={
+                    styles.sectionLabelDark
+                  }
+                >
+                  CURRENT HEART RATE
+                </Text>
+
+                <View
+                  style={
+                    styles.hrHeroRow
+                  }
+                >
+                  <Text
+                    style={
+                      styles.hrHeroValue
+                    }
+                  >
+                    {heartRate !==
+                    null
+                      ? heartRate
+                      : '--'}
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.hrHeroUnit
+                    }
+                  >
+                    BPM
+                  </Text>
+                </View>
+
+                <View
+                  style={[
+                    styles.heroStatusPill,
+                    styles[
+                      `heroStatus_${hrStatus.level}`
+                    ],
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.heroStatusDot,
+                      styles[
+                        `statusDot_${hrStatus.level}`
+                      ],
+                    ]}
+                  />
+
+                  <Text
+                    style={[
+                      styles.heroStatusText,
+                      styles[
+                        `heroStatusText_${hrStatus.level}`
+                      ],
+                    ]}
+                  >
+                    {hrStatus.label}
+                  </Text>
+                </View>
+              </View>
+
+              {/* ALERT */}
+
+              {heartRate !==
+                null &&
+                hrStatus.level !==
+                  'normal' && (
+                  <View
+                    style={[
+                      styles.alertCard,
+                      styles[
+                        `alertCard_${hrStatus.level}`
+                      ],
+                    ]}
+                  >
+                    <View
+                      style={
+                        styles.alertIconCircle
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.alertIcon
+                        }
+                      >
+                        !
+                      </Text>
+                    </View>
+
+                    <View
+                      style={
+                        styles.alertContent
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.alertTitle
+                        }
+                      >
+                        {hrStatus.label}{' '}
+                        heart rate
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.alertDescription
+                        }
+                      >
+                        {hrStatus.description}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+              {/* NORMAL */}
+
+              {heartRate !==
+                null &&
+                hrStatus.level ===
+                  'normal' && (
+                  <View
+                    style={
+                      styles.normalCard
+                    }
+                  >
+                    <View
+                      style={
+                        styles.normalIconCircle
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.normalIcon
+                        }
+                      >
+                        ✓
+                      </Text>
+                    </View>
+
+                    <View
+                      style={
+                        styles.alertContent
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.normalTitle
+                        }
+                      >
+                        Heart rate looks normal
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.normalDescription
+                        }
+                      >
+                        Current reading is within
+                        the typical resting range.
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+              {/* STATS */}
+
+              <View
+                style={
+                  styles.statsRow
+                }
+              >
+                <View
+                  style={
+                    styles.statCard
+                  }
+                >
+                  <Text
+                    style={
+                      styles.statLabel
+                    }
+                  >
+                    AVG
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.statValue
+                    }
+                  >
+                    {heartRateStats.average ??
+                      '--'}
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.statUnit
+                    }
+                  >
+                    BPM
+                  </Text>
+                </View>
+
+                <View
+                  style={
+                    styles.statCard
+                  }
+                >
+                  <Text
+                    style={
+                      styles.statLabel
+                    }
+                  >
+                    MIN
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.statValue
+                    }
+                  >
+                    {heartRateStats.minimum ??
+                      '--'}
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.statUnit
+                    }
+                  >
+                    BPM
+                  </Text>
+                </View>
+
+                <View
+                  style={
+                    styles.statCard
+                  }
+                >
+                  <Text
+                    style={
+                      styles.statLabel
+                    }
+                  >
+                    MAX
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.statValue
+                    }
+                  >
+                    {heartRateStats.maximum ??
+                      '--'}
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.statUnit
+                    }
+                  >
+                    BPM
+                  </Text>
+                </View>
+              </View>
+
+              {/* RANGE GUIDE */}
+
+              <View
+                style={
+                  styles.rangeCard
+                }
+              >
+                <Text
+                  style={
+                    styles.rangeTitle
+                  }
+                >
+                  HEART RATE RANGE GUIDE
+                </Text>
+
+                <View
+                  style={
+                    styles.rangeRow
+                  }
+                >
+                  <View
+                    style={[
+                      styles.rangeIndicator,
+                      styles.rangeNormal,
+                    ]}
+                  />
+
+                  <Text
+                    style={
+                      styles.rangeLabel
+                    }
+                  >
+                    50–100 BPM
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.rangeDescription
+                    }
+                  >
+                    Normal resting
+                  </Text>
+                </View>
+
+                <View
+                  style={
+                    styles.rangeRow
+                  }
+                >
+                  <View
+                    style={[
+                      styles.rangeIndicator,
+                      styles.rangeElevated,
+                    ]}
+                  />
+
+                  <Text
+                    style={
+                      styles.rangeLabel
+                    }
+                  >
+                    101–120
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.rangeDescription
+                    }
+                  >
+                    Elevated
+                  </Text>
+                </View>
+
+                <View
+                  style={
+                    styles.rangeRow
+                  }
+                >
+                  <View
+                    style={[
+                      styles.rangeIndicator,
+                      styles.rangeHigh,
+                    ]}
+                  />
+
+                  <Text
+                    style={
+                      styles.rangeLabel
+                    }
+                  >
+                    121–150
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.rangeDescription
+                    }
+                  >
+                    High
+                  </Text>
+                </View>
+
+                <View
+                  style={
+                    styles.rangeRow
+                  }
+                >
+                  <View
+                    style={[
+                      styles.rangeIndicator,
+                      styles.rangeVeryHigh,
+                    ]}
+                  />
+
+                  <Text
+                    style={
+                      styles.rangeLabel
+                    }
+                  >
+                    &gt;150
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.rangeDescription
+                    }
+                  >
+                    Very high
+                  </Text>
+                </View>
+
+                <View
+                  style={
+                    styles.rangeRow
+                  }
+                >
+                  <View
+                    style={[
+                      styles.rangeIndicator,
+                      styles.rangeLow,
+                    ]}
+                  />
+
+                  <Text
+                    style={
+                      styles.rangeLabel
+                    }
+                  >
+                    &lt;50
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.rangeDescription
+                    }
+                  >
+                    Low
+                  </Text>
+                </View>
+              </View>
+
+              {/* GRAPH */}
+
+              <View
+                style={
+                  styles.graphCard
+                }
+                onLayout={(event) => {
+                  setGraphWidth(
+                    event.nativeEvent
+                      .layout.width
+                  );
+                }}
+              >
+                <View
+                  style={
+                    styles.graphHeader
+                  }
+                >
+                  <View>
+                    <Text
+                      style={
+                        styles.graphTitle
+                      }
+                    >
+                      Heart rate trend
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.graphSubtitle
+                      }
+                    >
+                      Last 30 readings
+                    </Text>
+                  </View>
+
+                  <Text
+                    style={
+                      styles.readingCount
+                    }
+                  >
+                    {heartRateReadings.length}
+                  </Text>
+                </View>
+
+                {graphData ? (
+                  <View
+                    style={[
+                      styles.graphArea,
+                      {
+                        height:
+                          graphData.chartHeight,
+                      },
+                    ]}
+                  >
+                    {/* GRID */}
+
+                    <View
+                      style={[
+                        styles.gridLine,
+                        {
+                          top:
+                            graphData.topPadding,
+                          left:
+                            graphData.leftPadding,
+                          width:
+                            graphData.plotWidth,
+                        },
+                      ]}
+                    />
+
+                    <View
+                      style={[
+                        styles.gridLine,
+                        {
+                          top:
+                            graphData.topPadding +
+                            graphData.plotHeight /
+                              2,
+                          left:
+                            graphData.leftPadding,
+                          width:
+                            graphData.plotWidth,
+                        },
+                      ]}
+                    />
+
+                    <View
+                      style={[
+                        styles.gridLine,
+                        {
+                          top:
+                            graphData.topPadding +
+                            graphData.plotHeight,
+                          left:
+                            graphData.leftPadding,
+                          width:
+                            graphData.plotWidth,
+                        },
+                      ]}
+                    />
+
+                    {/* Y LABELS */}
+
+                    <Text
+                      style={[
+                        styles.graphYLabel,
+                        {
+                          top:
+                            graphData.topPadding -
+                            7,
+                        },
+                      ]}
+                    >
+                      {Math.round(
+                        graphData.maxValue
+                      )}
+                    </Text>
+
+                    <Text
+                      style={[
+                        styles.graphYLabel,
+                        {
+                          top:
+                            graphData.topPadding +
+                            graphData.plotHeight /
+                              2 -
+                            7,
+                        },
+                      ]}
+                    >
+                      {Math.round(
+                        (graphData.maxValue +
+                          graphData.minValue) /
+                          2
+                      )}
+                    </Text>
+
+                    <Text
+                      style={[
+                        styles.graphYLabel,
+                        {
+                          top:
+                            graphData.topPadding +
+                            graphData.plotHeight -
+                            7,
+                        },
+                      ]}
+                    >
+                      {Math.round(
+                        graphData.minValue
+                      )}
+                    </Text>
+
+                    {/* GRAPH LINES */}
+
+                    {graphData.points.map(
+                      (
+                        point,
+                        index
+                      ) => {
+                        if (
+                          index ===
+                          graphData.points
+                            .length -
+                            1
+                        ) {
+                          return null;
+                        }
+
+                        const next =
+                          graphData.points[
+                            index + 1
+                          ];
+
+                        const dx =
+                          next.x -
+                          point.x;
+
+                        const dy =
+                          next.y -
+                          point.y;
+
+                        const length =
+                          Math.sqrt(
+                            dx * dx +
+                              dy * dy
+                          );
+
+                        const angle =
+                          (Math.atan2(
+                            dy,
+                            dx
+                          ) *
+                            180) /
+                          Math.PI;
+
+                        return (
+                          <View
+                            key={`line-${index}`}
+                            style={[
+                              styles.graphSegment,
+                              {
+                                width:
+                                  length,
+                                left:
+                                  (point.x +
+                                    next.x) /
+                                    2 -
+                                  length /
+                                    2,
+                                top:
+                                  (point.y +
+                                    next.y) /
+                                    2 -
+                                  1.5,
+                                transform:
+                                  [
+                                    {
+                                      rotate: `${angle}deg`,
+                                    },
+                                  ],
+                              },
+                            ]}
+                          />
+                        );
+                      }
+                    )}
+
+                    {/* GRAPH POINTS */}
+
+                    {graphData.points.map(
+                      (
+                        point,
+                        index
+                      ) => {
+                        const isLast =
+                          index ===
+                          graphData.points
+                            .length -
+                            1;
+
+                        return (
+                          <View
+                            key={`point-${index}`}
+                            style={[
+                              styles.graphPoint,
+                              isLast &&
+                                styles.graphPointLast,
+                              {
+                                left:
+                                  point.x -
+                                  (isLast
+                                    ? 6
+                                    : 4),
+                                top:
+                                  point.y -
+                                  (isLast
+                                    ? 6
+                                    : 4),
+                              },
+                            ]}
+                          />
+                        );
+                      }
+                    )}
+                  </View>
+                ) : (
+                  <View
+                    style={
+                      styles.emptyGraph
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.emptyGraphTitle
+                      }
+                    >
+                      No heart rate data yet
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.emptyGraphText
+                      }
+                    >
+                      Connect the ring and wait
+                      for heart rate notifications.
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {/* RECENT READINGS */}
+
+              <View
+                style={
+                  styles.recentCard
+                }
+              >
+                <View
+                  style={
+                    styles.cardHeader
+                  }
+                >
+                  <Text
+                    style={
+                      styles.sectionLabel
+                    }
+                  >
+                    RECENT READINGS
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.mutedText
+                    }
+                  >
+                    Every notification
+                  </Text>
+                </View>
+
+                {heartRateReadings.length ===
+                0 ? (
+                  <Text
+                    style={
+                      styles.noReadingsText
+                    }
+                  >
+                    No readings recorded yet.
+                  </Text>
+                ) : (
+                  heartRateReadings
+                    .slice(-8)
+                    .reverse()
+                    .map(
+                      (
+                        reading,
+                        index
+                      ) => (
+                        <View
+                          key={`${reading.timestamp}-${index}`}
+                          style={
+                            styles.readingRow
+                          }
+                        >
+                          <View
+                            style={
+                              styles.readingDot
+                            }
+                          />
+
+                          <Text
+                            style={
+                              styles.readingTime
+                            }
+                          >
+                            {formatTime(
+                              reading.timestamp
+                            )}
+                          </Text>
+
+                          <View
+                            style={
+                              styles.readingSpacer
+                            }
+                          />
+
+                          <Text
+                            style={
+                              styles.readingValue
+                            }
+                          >
+                            {reading.value}
+                          </Text>
+
+                          <Text
+                            style={
+                              styles.readingUnit
+                            }
+                          >
+                            BPM
+                          </Text>
+                        </View>
+                      )
+                    )
+                )}
+              </View>
+
+              {/* ONLY THIS BUTTON CLEARS HISTORY */}
+
+              <Pressable
+                style={
+                  styles.secondaryButton
+                }
+                onPress={() => {
+                  setHeartRateReadings(
+                    []
+                  );
+                }}
+              >
+                <Text
+                  style={
+                    styles.secondaryButtonText
+                  }
+                >
+                  Clear analysis history
+                </Text>
+              </Pressable>
+            </>
+          )}
+
+          <Text
+            style={styles.footer}
+          >
+            SR08 Companion · BLE telemetry
+          </Text>
+        </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
-
-
-/*
- * ============================================================
- * GENERAL STYLES
- * ============================================================
- */
-
-const styles = StyleSheet.create({
-
-  safe: {
-    flex: 1,
-  },
-
-
-  container: {
-    padding: 24,
-    paddingBottom: 48,
-    gap: 16,
-  },
-
-
-  header: {
-    paddingTop: 20,
-    paddingBottom: 8,
-  },
-
-
-  titleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginTop: 6,
-  },
-
-
-  kicker: {
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 2,
-  },
-
-
-  title: {
-    fontSize: 36,
-    fontWeight: '800',
-    flex: 1,
-    marginRight: 10,
-  },
-
-
-  subtitle: {
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 6,
-    maxWidth: 320,
-  },
-
-
-  themeToggle: {
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-  },
-
-
-  themeToggleText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-
-
-  connectionCard: {
-    borderRadius: 16,
-    padding: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-  },
-
-
-  label: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-  },
-
-
-  statusText: {
-    fontSize: 13,
-    marginTop: 6,
-    maxWidth: 180,
-  },
-
-
-  primaryButton: {
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-  },
-
-
-  buttonText: {
-    fontWeight: '800',
-    fontSize: 13,
-  },
-
-
-  batteryCard: {
-    borderRadius: 16,
-    padding: 20,
-    gap: 14,
-    borderWidth: 1,
-  },
-
-
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-
-
-  batteryValue: {
-    fontSize: 32,
-    fontWeight: '800',
-  },
-
-
-  percent: {
-    fontSize: 18,
-  },
-
-
-  batteryBarBackground: {
-    height: 8,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-
-
-  batteryFill: {
-    height: '100%',
-  },
-
-
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    marginTop: 10,
-  },
-
-
-  controlCard: {
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 1,
-  },
-
-
-  controlHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-
-
-  controlTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-  },
-
-
-  characterCount: {
-    fontSize: 12,
-  },
-
-
-  inputRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 14,
-  },
-
-
-  input: {
-    borderRadius: 12,
-    fontSize: 20,
-    fontWeight: '700',
-    paddingHorizontal: 16,
-    height: 48,
-    flex: 1,
-    borderWidth: 1,
-  },
-
-
-  secondaryButton: {
-    borderRadius: 12,
-    justifyContent: 'center',
-    paddingHorizontal: 22,
-  },
-
-
-  secondaryText: {
-    fontWeight: '800',
-    fontSize: 14,
-  },
-
-
-  futureRow: {
-    borderRadius: 16,
-    padding: 18,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderWidth: 1,
-  },
-
-
-  futureTitle: {
-    fontWeight: '700',
-    fontSize: 15,
-  },
-
-
-  futureText: {
-    marginTop: 4,
-    fontSize: 12,
-  },
-
-
-  futureValue: {
-    fontWeight: '800',
-    fontSize: 14,
-  },
-
-
-  telemetry: {
-    fontSize: 10,
-    letterSpacing: 1.2,
-    marginTop: 10,
-  },
-
-});
-
-
-/*
- * ============================================================
- * DARK THEME
- * ============================================================
- */
-
-const darkStyles = StyleSheet.create({
-
-  safe: {
-    backgroundColor: '#18161B',
-  },
-
-
-  kicker: {
-    color: '#D4A373',
-  },
-
-
-  title: {
-    color: '#F4F1EA',
-  },
-
-
-  subtitle: {
-    color: '#9E98A0',
-  },
-
-
-  themeToggle: {
-    backgroundColor: '#26222B',
-    borderColor: '#342F3A',
-  },
-
-
-  themeToggleText: {
-    color: '#F4F1EA',
-  },
-
-
-  connectionCard: {
-    backgroundColor: '#26222B',
-    borderColor: '#342F3A',
-  },
-
-
-  label: {
-    color: '#9E98A0',
-  },
-
-
-  statusText: {
-    color: '#F4F1EA',
-  },
-
-
-  primaryButton: {
-    backgroundColor: '#8C4A5D',
-  },
-
-
-  disconnectButtonDark: {
-    backgroundColor: '#3D2F36',
-  },
-
-
-  buttonText: {
-    color: '#F4F1EA',
-  },
-
-
-  batteryCard: {
-    backgroundColor: '#26222B',
-    borderColor: '#342F3A',
-  },
-
-
-  batteryValue: {
-    color: '#F4F1EA',
-  },
-
-
-  percent: {
-    color: '#D4A373',
-  },
-
-
-  batteryBarBackground: {
-    backgroundColor: '#18161B',
-  },
-
-
-  batteryFill: {
-    backgroundColor: '#D4A373',
-  },
-
-
-  sectionTitle: {
-    color: '#F4F1EA',
-  },
-
-
-  controlCard: {
-    backgroundColor: '#26222B',
-    borderColor: '#342F3A',
-  },
-
-
-  controlTitle: {
-    color: '#F4F1EA',
-  },
-
-
-  characterCount: {
-    color: '#7A747D',
-  },
-
-
-  input: {
-    backgroundColor: '#18161B',
-    color: '#F4F1EA',
-    borderColor: '#342F3A',
-  },
-
-
-  secondaryButton: {
-    backgroundColor: '#8C4A5D',
-  },
-
-
-  secondaryText: {
-    color: '#F4F1EA',
-  },
-
-
-  futureRow: {
-    backgroundColor: '#26222B',
-    borderColor: '#342F3A',
-  },
-
-
-  futureTitle: {
-    color: '#F4F1EA',
-  },
-
-
-  futureText: {
-    color: '#7A747D',
-  },
-
-
-  futureValue: {
-    color: '#7A747D',
-  },
-
-
-  telemetry: {
-    color: '#7A747D',
-  },
-
-});
-
 
 /*
  * ============================================================
@@ -2589,159 +2443,1137 @@ const darkStyles = StyleSheet.create({
  */
 
 const lightStyles = StyleSheet.create({
-
-  safe: {
-    backgroundColor: '#f4f1ea',
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#F5F7FA',
   },
 
-
-  kicker: {
-    color: '#c4512c',
+  container: {
+    flex: 1,
+    backgroundColor: '#F5F7FA',
   },
 
-
-  title: {
-    color: '#1c2522',
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 40,
   },
 
-
-  subtitle: {
-    color: '#68716e',
+  header: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 22,
   },
 
-
-  themeToggle: {
-    backgroundColor: '#fffaf3',
-    borderColor: '#e6e0d7',
+  brand: {
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 1.8,
+    color: '#0F172A',
   },
 
-
-  themeToggleText: {
-    color: '#1c2522',
+  tagline: {
+    marginTop: 6,
+    fontSize: 13,
+    color: '#64748B',
   },
 
-
-  connectionCard: {
-    backgroundColor: '#1c2522',
-    borderColor: '#1c2522',
+  themeButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
 
-
-  label: {
-    color: '#95a19d',
+  themeButtonText: {
+    fontSize: 20,
+    color: '#0F172A',
   },
 
+  tabContainer: {
+    flexDirection: 'row',
+    padding: 4,
+    borderRadius: 14,
+    backgroundColor: '#E8EDF3',
+    marginBottom: 18,
+  },
+
+  tab: {
+    flex: 1,
+    paddingVertical: 11,
+    alignItems: 'center',
+    borderRadius: 11,
+  },
+
+  activeTab: {
+    backgroundColor: '#FFFFFF',
+  },
+
+  tabText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+
+  activeTabText: {
+    color: '#0F172A',
+  },
+
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#E5EAF0',
+  },
+
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  sectionLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    color: '#64748B',
+  },
+
+  sectionLabelDark: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    color: '#94A3B8',
+  },
+
+  deviceName: {
+    marginTop: 6,
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+
+  statusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#CBD5E1',
+  },
+
+  statusDotConnected: {
+    backgroundColor: '#14B8A6',
+  },
 
   statusText: {
-    color: '#f4f1ea',
+    marginTop: 8,
+    fontSize: 13,
+    color: '#64748B',
   },
-
 
   primaryButton: {
-    backgroundColor: '#e4734b',
+    marginTop: 18,
+    height: 48,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0F172A',
   },
 
-
-  disconnectButtonLight: {
-    backgroundColor: '#5c2c1c',
+  disconnectButton: {
+    backgroundColor: '#334155',
   },
 
-
-  buttonText: {
-    color: '#fffaf3',
+  primaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
   },
-
-
-  batteryCard: {
-    backgroundColor: '#fffaf3',
-    borderColor: '#e6e0d7',
-  },
-
 
   batteryValue: {
-    color: '#1c2522',
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#0F172A',
   },
 
-
-  percent: {
-    color: '#e4734b',
+  batteryTrack: {
+    height: 8,
+    marginTop: 18,
+    borderRadius: 4,
+    backgroundColor: '#E2E8F0',
+    overflow: 'hidden',
   },
-
-
-  batteryBarBackground: {
-    backgroundColor: '#e6e0d7',
-  },
-
 
   batteryFill: {
-    backgroundColor: '#e4734b',
+    height: '100%',
+    borderRadius: 4,
+    backgroundColor: '#14B8A6',
   },
 
-
-  sectionTitle: {
-    color: '#1c2522',
+  mutedText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#64748B',
   },
 
-
-  controlCard: {
-    backgroundColor: '#fffaf3',
-    borderColor: '#e6e0d7',
+  featureTitle: {
+    marginTop: 5,
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#0F172A',
   },
 
-
-  controlTitle: {
-    color: '#1c2522',
+  heartIcon: {
+    fontSize: 25,
+    color: '#0EA5E9',
   },
 
-
-  characterCount: {
-    color: '#9ca39f',
+  liveHrRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginTop: 12,
   },
 
-
-  input: {
-    backgroundColor: '#f0ebe2',
-    color: '#1c2522',
-    borderColor: '#e6e0d7',
+  liveHrValue: {
+    fontSize: 52,
+    fontWeight: '800',
+    letterSpacing: -2,
+    color: '#0F172A',
   },
 
+  liveHrUnit: {
+    marginLeft: 8,
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#64748B',
+  },
+
+  homeHrStatus: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+
+  homeHrStatusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+
+  homeHrStatusText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+
+  statusBackground_normal: {
+    backgroundColor: '#DCFCE7',
+  },
+
+  statusBackground_elevated: {
+    backgroundColor: '#FEF3C7',
+  },
+
+  statusBackground_high: {
+    backgroundColor: '#FFEDD5',
+  },
+
+  statusBackground_veryHigh: {
+    backgroundColor: '#FEE2E2',
+  },
+
+  statusBackground_low: {
+    backgroundColor: '#FEF3C7',
+  },
+
+  statusBackground_veryLow: {
+    backgroundColor: '#FEE2E2',
+  },
+
+  statusDot_normal: {
+    backgroundColor: '#16A34A',
+  },
+
+  statusDot_elevated: {
+    backgroundColor: '#D97706',
+  },
+
+  statusDot_high: {
+    backgroundColor: '#EA580C',
+  },
+
+  statusDot_veryHigh: {
+    backgroundColor: '#DC2626',
+  },
+
+  statusDot_low: {
+    backgroundColor: '#D97706',
+  },
+
+  statusDot_veryLow: {
+    backgroundColor: '#DC2626',
+  },
+
+  statusText_normal: {
+    color: '#166534',
+  },
+
+  statusText_elevated: {
+    color: '#92400E',
+  },
+
+  statusText_high: {
+    color: '#9A3412',
+  },
+
+  statusText_veryHigh: {
+    color: '#991B1B',
+  },
+
+  statusText_low: {
+    color: '#92400E',
+  },
+
+  statusText_veryLow: {
+    color: '#991B1B',
+  },
 
   secondaryButton: {
-    backgroundColor: 'transparent',
-    borderColor: '#c4512c',
+    marginTop: 16,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  secondaryButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+
+  sectionHeading: {
+    marginTop: 12,
+    marginBottom: 10,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    color: '#64748B',
+  },
+
+  featureCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 17,
+    padding: 15,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#E5EAF0',
+  },
+
+  featureIconBox: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E0F2FE',
+  },
+
+  featureIcon: {
+    fontSize: 20,
+    color: '#0284C7',
+  },
+
+  featureContent: {
+    flex: 1,
+    marginLeft: 13,
+  },
+
+  featureDescription: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#64748B',
+  },
+
+  liveBadge: {
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 7,
+    backgroundColor: '#CCFBF1',
+  },
+
+  liveBadgeText: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#0F766E',
+  },
+
+  soonBadge: {
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 7,
+    backgroundColor: '#F1F5F9',
+  },
+
+  soonBadgeText: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#64748B',
+  },
+
+  telemetryCard: {
+    marginTop: 8,
+    padding: 15,
+    borderRadius: 14,
+    backgroundColor: '#E2E8F0',
+  },
+
+  telemetryValue: {
+    marginTop: 7,
+    fontSize: 12,
+    color: '#334155',
+  },
+
+  analysisHeader: {
+    marginBottom: 14,
+  },
+
+  analysisTitle: {
+    fontSize: 27,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+
+  analysisSubtitle: {
+    marginTop: 5,
+    fontSize: 13,
+    color: '#64748B',
+  },
+
+  hrHeroCard: {
+    backgroundColor: '#0F172A',
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 12,
+  },
+
+  hrHeroRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginTop: 10,
+  },
+
+  hrHeroValue: {
+    fontSize: 58,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: -2,
+  },
+
+  hrHeroUnit: {
+    marginLeft: 9,
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#94A3B8',
+  },
+
+  heroStatusPill: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+
+  heroStatusText: {
+    marginLeft: 6,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+
+  heroStatus_normal: {
+    backgroundColor: '#14532D',
+  },
+
+  heroStatus_elevated: {
+    backgroundColor: '#713F12',
+  },
+
+  heroStatus_high: {
+    backgroundColor: '#7C2D12',
+  },
+
+  heroStatus_veryHigh: {
+    backgroundColor: '#7F1D1D',
+  },
+
+  heroStatus_low: {
+    backgroundColor: '#713F12',
+  },
+
+  heroStatus_veryLow: {
+    backgroundColor: '#7F1D1D',
+  },
+
+  heroStatusText_normal: {
+    color: '#BBF7D0',
+  },
+
+  heroStatusText_elevated: {
+    color: '#FDE68A',
+  },
+
+  heroStatusText_high: {
+    color: '#FED7AA',
+  },
+
+  heroStatusText_veryHigh: {
+    color: '#FECACA',
+  },
+
+  heroStatusText_low: {
+    color: '#FDE68A',
+  },
+
+  heroStatusText_veryLow: {
+    color: '#FECACA',
+  },
+
+  heroStatusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+
+  alertCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 16,
+    padding: 15,
+    marginBottom: 12,
     borderWidth: 1,
   },
 
-
-  secondaryText: {
-    color: '#c4512c',
+  alertCard_elevated: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
   },
 
-
-  futureRow: {
-    backgroundColor: '#e7e5dc',
-    borderColor: '#e7e5dc',
+  alertCard_high: {
+    backgroundColor: '#FFF7ED',
+    borderColor: '#FED7AA',
   },
 
-
-  futureTitle: {
-    color: '#1c2522',
+  alertCard_veryHigh: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
   },
 
-
-  futureText: {
-    color: '#737c78',
+  alertCard_low: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
   },
 
-
-  futureValue: {
-    color: '#7e8984',
+  alertCard_veryLow: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
   },
 
-
-  telemetry: {
-    color: '#9ca39f',
+  alertIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#DC2626',
   },
 
+  alertIcon: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '900',
+  },
+
+  alertContent: {
+    flex: 1,
+    marginLeft: 11,
+  },
+
+  alertTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+
+  alertDescription: {
+    marginTop: 3,
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#64748B',
+  },
+
+  normalCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 16,
+    padding: 15,
+    marginBottom: 12,
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+  },
+
+  normalIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#16A34A',
+  },
+
+  normalIcon: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+
+  normalTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#166534',
+  },
+
+  normalDescription: {
+    marginTop: 3,
+    fontSize: 11,
+    color: '#64748B',
+  },
+
+  statsRow: {
+    flexDirection: 'row',
+    gap: 9,
+    marginBottom: 12,
+  },
+
+  statCard: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 15,
+    padding: 13,
+    borderWidth: 1,
+    borderColor: '#E5EAF0',
+  },
+
+  statLabel: {
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 1,
+    color: '#64748B',
+  },
+
+  statValue: {
+    marginTop: 8,
+    fontSize: 25,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+
+  statUnit: {
+    marginTop: 2,
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#94A3B8',
+  },
+
+  rangeCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5EAF0',
+  },
+
+  rangeTitle: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+    color: '#64748B',
+    marginBottom: 8,
+  },
+
+  rangeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 7,
+  },
+
+  rangeIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 9,
+  },
+
+  rangeNormal: {
+    backgroundColor: '#16A34A',
+  },
+
+  rangeElevated: {
+    backgroundColor: '#D97706',
+  },
+
+  rangeHigh: {
+    backgroundColor: '#EA580C',
+  },
+
+  rangeVeryHigh: {
+    backgroundColor: '#DC2626',
+  },
+
+  rangeLow: {
+    backgroundColor: '#D97706',
+  },
+
+  rangeLabel: {
+    width: 75,
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#334155',
+  },
+
+  rangeDescription: {
+    fontSize: 11,
+    color: '#64748B',
+  },
+
+  graphCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5EAF0',
+    overflow: 'hidden',
+  },
+
+  graphHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+
+  graphTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+
+  graphSubtitle: {
+    marginTop: 3,
+    fontSize: 11,
+    color: '#94A3B8',
+  },
+
+  readingCount: {
+    minWidth: 30,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    textAlign: 'center',
+    borderRadius: 8,
+    backgroundColor: '#E0F2FE',
+    color: '#0369A1',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+
+  graphArea: {
+    marginTop: 12,
+    position: 'relative',
+    width: '100%',
+  },
+
+  gridLine: {
+    position: 'absolute',
+    height: 1,
+    backgroundColor: '#E2E8F0',
+  },
+
+  graphYLabel: {
+    position: 'absolute',
+    left: 0,
+    width: 31,
+    fontSize: 9,
+    color: '#94A3B8',
+    textAlign: 'right',
+  },
+
+  graphSegment: {
+    position: 'absolute',
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: '#0EA5E9',
+  },
+
+  graphPoint: {
+    position: 'absolute',
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#0EA5E9',
+  },
+
+  graphPointLast: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#0EA5E9',
+    borderWidth: 3,
+    borderColor: '#BAE6FD',
+  },
+
+  emptyGraph: {
+    height: 190,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 30,
+  },
+
+  emptyGraphTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#334155',
+  },
+
+  emptyGraphText: {
+    marginTop: 6,
+    textAlign: 'center',
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#94A3B8',
+  },
+
+  recentCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5EAF0',
+  },
+
+  noReadingsText: {
+    marginTop: 15,
+    fontSize: 13,
+    color: '#94A3B8',
+  },
+
+  readingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+
+  readingDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#0EA5E9',
+  },
+
+  readingTime: {
+    marginLeft: 10,
+    fontSize: 12,
+    color: '#64748B',
+  },
+
+  readingSpacer: {
+    flex: 1,
+  },
+
+  readingValue: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+
+  readingUnit: {
+    marginLeft: 5,
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#94A3B8',
+  },
+
+  footer: {
+    marginTop: 24,
+    textAlign: 'center',
+    fontSize: 10,
+    color: '#94A3B8',
+  },
 });
 
+/*
+ * ============================================================
+ * DARK THEME
+ * ============================================================
+ */
+
+const darkStyles = StyleSheet.create({
+  ...lightStyles,
+
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#080D16',
+  },
+
+  container: {
+    flex: 1,
+    backgroundColor: '#080D16',
+  },
+
+  brand: {
+    ...lightStyles.brand,
+    color: '#F8FAFC',
+  },
+
+  tagline: {
+    ...lightStyles.tagline,
+    color: '#94A3B8',
+  },
+
+  themeButton: {
+    ...lightStyles.themeButton,
+    backgroundColor: '#111827',
+    borderColor: '#1E293B',
+  },
+
+  themeButtonText: {
+    ...lightStyles.themeButtonText,
+    color: '#F8FAFC',
+  },
+
+  tabContainer: {
+    ...lightStyles.tabContainer,
+    backgroundColor: '#111827',
+  },
+
+  activeTab: {
+    backgroundColor: '#1E293B',
+  },
+
+  tabText: {
+    ...lightStyles.tabText,
+    color: '#94A3B8',
+  },
+
+  activeTabText: {
+    color: '#F8FAFC',
+  },
+
+  card: {
+    ...lightStyles.card,
+    backgroundColor: '#111827',
+    borderColor: '#1E293B',
+  },
+
+  sectionLabel: {
+    ...lightStyles.sectionLabel,
+    color: '#94A3B8',
+  },
+
+  deviceName: {
+    ...lightStyles.deviceName,
+    color: '#F8FAFC',
+  },
+
+  statusText: {
+    ...lightStyles.statusText,
+    color: '#94A3B8',
+  },
+
+  batteryValue: {
+    ...lightStyles.batteryValue,
+    color: '#F8FAFC',
+  },
+
+  batteryTrack: {
+    ...lightStyles.batteryTrack,
+    backgroundColor: '#1E293B',
+  },
+
+  mutedText: {
+    ...lightStyles.mutedText,
+    color: '#94A3B8',
+  },
+
+  featureTitle: {
+    ...lightStyles.featureTitle,
+    color: '#F8FAFC',
+  },
+
+  liveHrValue: {
+    ...lightStyles.liveHrValue,
+    color: '#F8FAFC',
+  },
+
+  liveHrUnit: {
+    ...lightStyles.liveHrUnit,
+    color: '#94A3B8',
+  },
+
+  secondaryButton: {
+    ...lightStyles.secondaryButton,
+    borderColor: '#334155',
+  },
+
+  secondaryButtonText: {
+    ...lightStyles.secondaryButtonText,
+    color: '#F8FAFC',
+  },
+
+  sectionHeading: {
+    ...lightStyles.sectionHeading,
+    color: '#94A3B8',
+  },
+
+  featureCard: {
+    ...lightStyles.featureCard,
+    backgroundColor: '#111827',
+    borderColor: '#1E293B',
+  },
+
+  featureDescription: {
+    ...lightStyles.featureDescription,
+    color: '#94A3B8',
+  },
+
+  telemetryCard: {
+    ...lightStyles.telemetryCard,
+    backgroundColor: '#111827',
+  },
+
+  telemetryValue: {
+    ...lightStyles.telemetryValue,
+    color: '#CBD5E1',
+  },
+
+  analysisTitle: {
+    ...lightStyles.analysisTitle,
+    color: '#F8FAFC',
+  },
+
+  analysisSubtitle: {
+    ...lightStyles.analysisSubtitle,
+    color: '#94A3B8',
+  },
+
+  statsRow: {
+    ...lightStyles.statsRow,
+  },
+
+  statCard: {
+    ...lightStyles.statCard,
+    backgroundColor: '#111827',
+    borderColor: '#1E293B',
+  },
+
+  statValue: {
+    ...lightStyles.statValue,
+    color: '#F8FAFC',
+  },
+
+  rangeCard: {
+    ...lightStyles.rangeCard,
+    backgroundColor: '#111827',
+    borderColor: '#1E293B',
+  },
+
+  rangeLabel: {
+    ...lightStyles.rangeLabel,
+    color: '#CBD5E1',
+  },
+
+  rangeDescription: {
+    ...lightStyles.rangeDescription,
+    color: '#94A3B8',
+  },
+
+  graphCard: {
+    ...lightStyles.graphCard,
+    backgroundColor: '#111827',
+    borderColor: '#1E293B',
+  },
+
+  graphTitle: {
+    ...lightStyles.graphTitle,
+    color: '#F8FAFC',
+  },
+
+  gridLine: {
+    ...lightStyles.gridLine,
+    backgroundColor: '#1E293B',
+  },
+
+  graphYLabel: {
+    ...lightStyles.graphYLabel,
+    color: '#64748B',
+  },
+
+  emptyGraphTitle: {
+    ...lightStyles.emptyGraphTitle,
+    color: '#CBD5E1',
+  },
+
+  emptyGraphText: {
+    ...lightStyles.emptyGraphText,
+    color: '#64748B',
+  },
+
+  recentCard: {
+    ...lightStyles.recentCard,
+    backgroundColor: '#111827',
+    borderColor: '#1E293B',
+  },
+
+  readingRow: {
+    ...lightStyles.readingRow,
+    borderBottomColor: '#1E293B',
+  },
+
+  readingValue: {
+    ...lightStyles.readingValue,
+    color: '#F8FAFC',
+  },
+
+  readingTime: {
+    ...lightStyles.readingTime,
+    color: '#94A3B8',
+  },
+
+  footer: {
+    ...lightStyles.footer,
+    color: '#475569',
+  },
+});
