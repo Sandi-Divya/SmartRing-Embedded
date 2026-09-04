@@ -28,6 +28,9 @@ const HEART_RATE_SERVICE =
 const HEART_RATE_CHARACTERISTIC =
   '16005991-b131-3396-014c-664c9867b919';
 
+const CLOCK_CHARACTERISTIC =
+  '25005991-b131-3396-014c-664c9867b920';
+
 type HeartRateReading = {
   value: number;
   timestamp: number;
@@ -295,8 +298,6 @@ export default function App() {
 
           /*
            * DO NOT CLEAR heartRateReadings HERE.
-           *
-           * Historical heart-rate data stays in the app.
            */
 
           setStatus('Bluetooth off');
@@ -346,14 +347,119 @@ export default function App() {
       setTelemetry(null);
 
       /*
-       * IMPORTANT:
-       * Historical HR readings are intentionally preserved.
+       * Historical HR readings are preserved.
        */
 
       setStatus('Disconnected');
       seenDevicesRef.current.clear();
     }
   };
+
+  /*
+   * ============================================================
+   * AUTOMATIC PHONE CLOCK SYNC
+   * ============================================================
+   *
+   * Phone is authoritative.
+   *
+   * Raw payload:
+   *
+   * byte 0 = hour   0-23
+   * byte 1 = minute 0-59
+   *
+   * Example:
+   * 10:42 -> [0x0A, 0x2A]
+   */
+
+
+  const syncPhoneTimeToRing = async (
+    connectedDevice: Device
+  ) => {
+    try {
+      const now = new Date();
+
+      const hour = now.getHours();
+      const minute = now.getMinutes();
+
+      console.log(
+        'Syncing phone time to ring:',
+        `${String(hour).padStart(2, '0')}:${String(
+          minute
+        ).padStart(2, '0')}`
+      );
+
+      /*
+      * Clock characteristic is located under HR_SERVICE.
+      */
+      const hrService = await connectedDevice
+        .services();
+
+      const targetService = hrService.find(
+        service =>
+          service.uuid.toLowerCase() ===
+          HEART_RATE_SERVICE.toLowerCase()
+      );
+
+      if (!targetService) {
+        throw new Error(
+          `HR service not found: ${HEART_RATE_SERVICE}`
+        );
+      }
+
+      const characteristics =
+        await targetService.characteristics();
+
+      console.log(
+        'HR service characteristics:',
+        characteristics.map(c => c.uuid)
+      );
+
+      const clockCharacteristic =
+        characteristics.find(
+          characteristic =>
+            characteristic.uuid.toLowerCase() ===
+            CLOCK_CHARACTERISTIC.toLowerCase()
+        );
+
+      if (!clockCharacteristic) {
+        throw new Error(
+          `Clock characteristic not found: ${CLOCK_CHARACTERISTIC}`
+        );
+      }
+
+      /*
+      * Clock protocol:
+      * byte 0 = hour   (0-23)
+      * byte 1 = minute (0-59)
+      */
+      const binary = String.fromCharCode(
+        hour,
+        minute
+      );
+
+      const base64 = btoa(binary);
+
+      await connectedDevice.writeCharacteristicWithResponseForService(
+        HEART_RATE_SERVICE,
+        CLOCK_CHARACTERISTIC,
+        base64
+      );
+
+      console.log(
+        'Phone time synced successfully:',
+        `${String(hour).padStart(2, '0')}:${String(
+          minute
+        ).padStart(2, '0')}`
+      );
+    } catch (error) {
+      console.log(
+        'Clock sync error:',
+        error
+      );
+    }
+  };
+
+
 
   /*
    * ============================================================
@@ -417,7 +523,6 @@ export default function App() {
             setTelemetry(null);
 
             /*
-             * IMPORTANT:
              * DO NOT clear heartRateReadings.
              */
 
@@ -425,10 +530,19 @@ export default function App() {
           }
         );
 
+      /*
+       * ========================================================
+       * SERVICE DISCOVERY
+       * ========================================================
+       */
+
       const discoveredDevice =
         await connectedDevice
           .discoverAllServicesAndCharacteristics();
 
+      /*
+       * Get services ONCE.
+       */
       const services =
         await discoveredDevice.services();
 
@@ -439,6 +553,9 @@ export default function App() {
         )
       );
 
+      /*
+       * Print all services and characteristics.
+       */
       for (const service of services) {
         const characteristics =
           await service.characteristics();
@@ -453,6 +570,19 @@ export default function App() {
           )
         );
       }
+
+      /*
+       * ========================================================
+       * CLOCK SYNC
+       * ========================================================
+       *
+       * Automatically sync the phone's current time
+       * immediately after BLE service discovery.
+       */
+
+      await syncPhoneTimeToRing(
+        discoveredDevice
+      );
 
       /*
        * ========================================================
@@ -661,9 +791,7 @@ export default function App() {
       setTelemetry(null);
 
       /*
-       * IMPORTANT:
-       * Keep previous HR history even if
-       * a new connection attempt fails.
+       * Keep previous HR history.
        */
 
       setStatus('Connection failed');
@@ -2402,7 +2530,7 @@ export default function App() {
                 )}
               </View>
 
-              {/* ONLY THIS BUTTON CLEARS HISTORY */}
+              {/* CLEAR HISTORY */}
 
               <Pressable
                 style={

@@ -74,7 +74,7 @@
 #include "display.h"
 #include "wkupct_quadec.h"
 
-extern void app_clock_set_time(uint8_t hour,uint8_t minute);
+extern void app_clock_set_time(uint8_t hour, uint8_t minute);
 
 
 /*
@@ -217,7 +217,7 @@ static uint8_t last_sent_batt_lvl =
  */
 
 uint8_t current_hr_value =
-    75;
+    155;
 
 timer_hnd app_hr_poll_timer =
     EASY_TIMER_INVALID_TIMER;
@@ -831,7 +831,7 @@ static void app_hr_poll_timer_cb(void)
      */
 
     current_hr_value =
-        75;
+        155;
 
 
     /*
@@ -932,6 +932,26 @@ static void stop_hr_polling(void)
 }
 
 
+/*
+ ****************************************************************************************
+ * CLOCK
+ ****************************************************************************************
+ *
+ * Phone sends the current time only when BLE
+ * connects.
+ *
+ * After receiving the time:
+ *
+ *      phone  -> HH:MM
+ *      ring   -> stores HH:MM
+ *      timer  -> advances one minute
+ *
+ * The clock timer is NOT stopped when BLE
+ * disconnects.
+ *
+ ****************************************************************************************
+ */
+
 static void app_clock_timer_cb(void)
 {
     /*
@@ -946,10 +966,12 @@ static void app_clock_timer_cb(void)
         return;
     }
 
+
     /*
      * Advance one minute.
      */
     manual_clock_minute++;
+
 
     if (manual_clock_minute >= 60)
     {
@@ -957,15 +979,53 @@ static void app_clock_timer_cb(void)
 
         manual_clock_hour++;
 
+
         if (manual_clock_hour >= 24)
         {
             manual_clock_hour = 0;
         }
     }
 
+
     /*
-     * 6000 x 10 ms = 60 seconds.
+     ****************************************************************************************
+     * UPDATE OLED
+     ****************************************************************************************
+     *
+     * Only update OLED when TIME is currently
+     * being displayed.
+     *
+     * Battery and HR screens are not interrupted.
      */
+
+    if ((display_is_on != 0) &&
+        (display_sequence == DISPLAY_SEQUENCE_TIME))
+    {
+        display_show_time(
+            manual_clock_hour,
+            manual_clock_minute
+        );
+    }
+
+
+    /*
+     ****************************************************************************************
+     * NEXT CLOCK UPDATE
+     ****************************************************************************************
+     *
+     * IMPORTANT:
+     *
+     * app_easy_timer() uses 10 ms units.
+     *
+     * 6000 x 10 ms
+     * = 60000 ms
+     * = 60 seconds
+     * = 1 minute.
+     *
+     * Therefore the ring advances exactly one
+     * minute per timer callback.
+     */
+
     app_clock_timer =
         app_easy_timer(
             6000,
@@ -974,20 +1034,37 @@ static void app_clock_timer_cb(void)
 }
 
 
+/*
+ ****************************************************************************************
+ * STOP CLOCK
+ ****************************************************************************************
+ */
+
 static void stop_clock(void)
 {
-    if (app_clock_timer != EASY_TIMER_INVALID_TIMER)
+    if (app_clock_timer !=
+        EASY_TIMER_INVALID_TIMER)
     {
-        app_easy_timer_cancel(app_clock_timer);
-        app_clock_timer = EASY_TIMER_INVALID_TIMER;
+        app_easy_timer_cancel(
+            app_clock_timer
+        );
+
+        app_clock_timer =
+            EASY_TIMER_INVALID_TIMER;
     }
 }
 
 
+/*
+ ****************************************************************************************
+ * START CLOCK
+ ****************************************************************************************
+ */
 
 static void start_clock(void)
 {
     stop_clock();
+
 
     /*
      * Do NOT create a fake starting time.
@@ -995,10 +1072,16 @@ static void start_clock(void)
      * Until the phone sends the first time,
      * clock_time_valid remains 0.
      */
-    manual_clock_hour = 0;
-    manual_clock_minute = 0;
 
-    clock_time_valid = 0;
+    manual_clock_hour =
+        0;
+
+    manual_clock_minute =
+        0;
+
+    clock_time_valid =
+        0;
+
 
     /*
      * Do not start the minute counter yet.
@@ -1020,6 +1103,11 @@ static void start_clock(void)
  * This is called when the mobile application
  * writes the current phone time to the Clock
  * characteristic.
+ *
+ * This happens once after BLE connection.
+ *
+ * The stored time then continues running even
+ * after BLE disconnects.
  ****************************************************************************************
  */
 
@@ -1028,16 +1116,21 @@ void app_clock_set_time(
                     uint8_t minute)
 {
     /*
-     * Reject invalid time.
+     * Validate hour.
      */
     if (hour >= 24)
         return;
 
+
+    /*
+     * Validate minute.
+     */
     if (minute >= 60)
         return;
 
+
     /*
-     * Store the new time.
+     * Store phone time.
      */
     manual_clock_hour =
         hour;
@@ -1045,24 +1138,46 @@ void app_clock_set_time(
     manual_clock_minute =
         minute;
 
+
     /*
      * Time is now valid.
      */
     clock_time_valid =
         1;
 
+
     /*
-     * Restart the minute timer from the
-     * newly received phone time.
+     * Restart the one-minute clock timer.
+     *
+     * This is important when reconnecting:
+     *
+     *      old ring time -> replaced by phone time
+     *      timer          -> starts counting again
      */
     stop_clock();
+
 
     app_clock_timer =
         app_easy_timer(
             6000,
             app_clock_timer_cb
         );
+
+
+    /*
+     * Immediately refresh OLED if the TIME
+     * screen is currently visible.
+     */
+    if ((display_is_on != 0) &&
+        (display_sequence == DISPLAY_SEQUENCE_TIME))
+    {
+        display_show_time(
+            manual_clock_hour,
+            manual_clock_minute
+        );
+    }
 }
+
 
 /*
  ****************************************************************************************
@@ -1119,19 +1234,19 @@ static void long_press_timer_cb(void)
 
 
         if (clock_time_valid)
-				{
-						display_show_time(
-								manual_clock_hour,
-								manual_clock_minute
-						);
-				}
-				else
-				{
-						display_show_time(
-								255,
-								255
-						);
-				}
+        {
+            display_show_time(
+                manual_clock_hour,
+                manual_clock_minute
+            );
+        }
+        else
+        {
+            display_show_time(
+                255,
+                255
+            );
+        }
     }
 
 
@@ -1748,14 +1863,17 @@ void user_app_init(void)
      * Temporary HR test value.
      */
     current_hr_value =
-        75;
+        155;
 
 
-    manual_clock_hour = 0;
+    manual_clock_hour =
+        0;
 
-		manual_clock_minute = 0;
+    manual_clock_minute =
+        0;
 
-		clock_time_valid = 0;
+    clock_time_valid =
+        0;
 
 
     touch_press_active =
@@ -1789,6 +1907,9 @@ void user_app_init(void)
 
     /*
      * Start manual clock.
+     *
+     * The timer itself will remain stopped
+     * until the phone sends the first valid time.
      */
     start_clock();
 
@@ -2064,66 +2185,99 @@ void app_advertise_complete(
  */
 
 void user_catch_rest_hndl(
-                    ke_msg_id_t const msgid,
-                    void const *param,
-                    const ke_task_id_t dest_id,
-                    const ke_task_id_t src_id)
+                            ke_msg_id_t const msgid,
+                            void const *param,
+                            const ke_task_id_t dest_id,
+                            const ke_task_id_t src_id)
 {
     switch (msgid)
     {
+        /*
+         * ================================================================
+         * CLOCK WRITE
+         * ================================================================
+         *
+         * Phone sends exactly two raw bytes:
+         *
+         *      byte 0 = hour
+         *      byte 1 = minute
+         *
+         * Example:
+         *
+         *      14:35
+         *
+         *      0E 23
+         *
+         * Only the Clock characteristic is accepted.
+         *
+         * This prevents battery/HR writes from
+         * accidentally changing the clock.
+         */
+        case CUSTS1_VAL_WRITE_IND:
+        {
+            struct custs1_val_write_ind const *msg_param;
 
 
-				case CUSTS1_VAL_WRITE_IND:
-				{
-						struct custs1_val_write_ind const *msg_param;
-
-						msg_param =
-								(struct custs1_val_write_ind const *)param;
-
-						if (msg_param == NULL)
-								break;
-
-						/*
-						 * ============================================================
-						 * DIAGNOSTIC LED
-						 *
-						 * If this LED turns ON when nRF Connect sends a write,
-						 * we know the BLE write reached this handler.
-						 * ============================================================
-						 */
-						GPIO_SetActive(
-								GPIO_LED_PORT,
-								GPIO_LED_PIN
-						);
-
-						/*
-						 * ============================================================
-						 * CLOCK
-						 * ============================================================
-						 */
-						if ((msg_param->handle ==
-								 SVC3_IDX_CLOCK_VAL_VAL) &&
-								(msg_param->length >= 2))
-						{
-								uint8_t hour =
-										msg_param->value[0];
-
-								uint8_t minute =
-										msg_param->value[1];
-
-								if ((hour < 24) &&
-										(minute < 60))
-								{
-										app_clock_set_time(
-												hour,
-												minute
-										);
-								}
-						}
-				}
-				break;
+            msg_param =
+                (struct custs1_val_write_ind const *)param;
 
 
+            if (msg_param == NULL)
+                break;
+
+
+            GPIO_SetActive(
+                GPIO_LED_PORT,
+                GPIO_LED_PIN
+            );
+
+
+            /*
+             * ONLY accept writes to the Clock
+             * characteristic.
+             */
+            if ((msg_param->handle ==
+                 SVC3_IDX_CLOCK_VAL_VAL) &&
+                (msg_param->length >= 2))
+            {
+                uint8_t hour;
+                uint8_t minute;
+
+
+                hour =
+                    msg_param->value[0];
+
+
+                minute =
+                    msg_param->value[1];
+
+
+                /*
+                 * Validate received time.
+                 */
+                if ((hour < 24) &&
+                    (minute < 60))
+                {
+                    /*
+                     * Store phone time and
+                     * restart the one-minute
+                     * clock timer.
+                     */
+                    app_clock_set_time(
+                        hour,
+                        minute
+                    );
+                }
+            }
+        }
+        break;
+
+
+        /*
+         * ================================================================
+         * GATT EVENT CONFIRMATION
+         * ================================================================
+         */
 
         case GATTC_EVENT_REQ_IND:
         {
