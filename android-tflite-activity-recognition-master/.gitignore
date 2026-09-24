@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# Data
+ml/data/
+
+# Models / generated artifacts
+ml/models/
+*.tflite
+*.h5
+*.keras
+
+# Android
+.gradle/
+build/
+local.properties
+.idea/
+*.iml

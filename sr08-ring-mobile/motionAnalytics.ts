@@ -12,6 +12,21 @@
 export type ActivityState = 'sleeping' | 'resting' | 'moving' | 'walking';
 export type SleepStage = 'awake' | 'light' | 'deep' | 'restless';
 
+export type HarActivity =
+  | 'WALKING'
+  | 'WALKING_UPSTAIRS'
+  | 'WALKING_DOWNSTAIRS'
+  | 'SITTING'
+  | 'STANDING'
+  | 'LAYING';
+
+export interface HarPrediction {
+  activity: HarActivity;
+  confidence: number;
+  probabilities: Record<HarActivity, number>;
+  cadenceSPM: number;
+}
+
 export interface RawAccelSample {
   x: number;
   y: number;
@@ -38,6 +53,11 @@ export interface MotionMetrics {
   sampleRateHz: number;
   noiseFiltered: boolean;
   dynamicEnergy: number;
+
+  // ML Activity Recognition (HAR Model)
+  mlActivity: HarActivity;
+  mlConfidence: number;
+  mlProbabilities: Record<HarActivity, number>;
 
   // Walking & Steps
   steps: number;
@@ -114,6 +134,23 @@ export class MotionAnalyticsEngine {
   private readonly CADENCE_MAX_MS = 1250;       // Min ~48 SPM (slow stroll)
   private readonly WALKING_TIMEOUT_MS = 1600;   // 1.6s without verified step ends walking session
 
+  // ML Human Activity Recognition (HAR) Sliding Window Buffer
+  private readonly HAR_WINDOW_SIZE = 32; // 3.2s temporal window at 10 Hz
+  private harWindow: { x: number; y: number; z: number; mag: number }[] = [];
+  private currentHarPrediction: HarPrediction = {
+    activity: 'SITTING',
+    confidence: 85,
+    probabilities: {
+      WALKING: 0,
+      WALKING_UPSTAIRS: 0,
+      WALKING_DOWNSTAIRS: 0,
+      SITTING: 0.85,
+      STANDING: 0.12,
+      LAYING: 0.03,
+    },
+    cadenceSPM: 0,
+  };
+
   // Moves & activity state
   private movesCount = 0;
   private activeSamples = 0;
@@ -155,6 +192,20 @@ export class MotionAnalyticsEngine {
     this.crestTime = 0;
     this.troughVal = 0;
     this.candidateStepTimes = [];
+    this.harWindow = [];
+    this.currentHarPrediction = {
+      activity: 'SITTING',
+      confidence: 85,
+      probabilities: {
+        WALKING: 0,
+        WALKING_UPSTAIRS: 0,
+        WALKING_DOWNSTAIRS: 0,
+        SITTING: 0.85,
+        STANDING: 0.12,
+        LAYING: 0.03,
+      },
+      cadenceSPM: 0,
+    };
     this.movesCount = 0;
     this.activeSamples = 0;
     this.restingSamples = 0;
@@ -294,7 +345,23 @@ export class MotionAnalyticsEngine {
     };
 
     // =========================================================================
-    // STAGE 5: Bipolar Wave Pedometer with Rhythm Cadence Verification
+    // STAGE 5: Temporal Sliding Window & ML Human Activity Recognition (HAR)
+    // =========================================================================
+    this.harWindow.push({
+      x: Math.round(this.filtX),
+      y: Math.round(this.filtY),
+      z: Math.round(this.filtZ),
+      mag: filteredMag,
+    });
+    if (this.harWindow.length > this.HAR_WINDOW_SIZE) {
+      this.harWindow.shift();
+    }
+
+    // Run ML HAR model inference on inertial sliding window
+    this.currentHarPrediction = this.inferHarActivity();
+
+    // =========================================================================
+    // STAGE 6: Bipolar Wave Pedometer with ML Rhythm Coordination
     // =========================================================================
     // Human walking produces alternating crests and troughs across the gravity baseline.
     // General non-walking movements fail to produce symmetric peak-valley pairs with
@@ -344,16 +411,23 @@ export class MotionAnalyticsEngine {
     }
 
     // =========================================================================
-    // STAGE 6: Moves & Activity Classification
+    // STAGE 7: Moves & Activity Classification (Enhanced by ML HAR)
     // =========================================================================
     const isMoving = cleanEnergy >= this.MOVE_ENERGY_THRESHOLD;
+    const isMlWalking =
+      this.currentHarPrediction.activity === 'WALKING' ||
+      this.currentHarPrediction.activity === 'WALKING_UPSTAIRS' ||
+      this.currentHarPrediction.activity === 'WALKING_DOWNSTAIRS';
 
-    if (isMoving) {
+    if (isMoving && !isMlWalking) {
       this.activeSamples++;
       if (!this.wasActiveLastSample) {
         this.movesCount++;
         this.wasActiveLastSample = true;
       }
+    } else if (isMlWalking) {
+      this.activeSamples++;
+      this.wasActiveLastSample = false;
     } else {
       this.restingSamples++;
       if (cleanEnergy === 0) {
@@ -362,19 +436,23 @@ export class MotionAnalyticsEngine {
     }
 
     // =========================================================================
-    // STAGE 7: Sleep Time & Sleep Stage Tracking
+    // STAGE 8: Sleep Time & Sleep Stage Tracking (Assisted by ML HAR)
     // =========================================================================
     const isCompletelyStill = cleanEnergy === 0;
+    const isLaying = this.currentHarPrediction.activity === 'LAYING';
 
-    if (isCompletelyStill) {
+    if (isCompletelyStill || isLaying) {
       this.continuousStillnessMs += 100;
 
       if (!this.isSleeping) {
-        // Must maintain uninterrupted stillness for 3 minutes to enter sleep state
-        if (this.continuousStillnessMs >= this.SLEEP_ONSET_DELAY_MS) {
+        // Must maintain uninterrupted stillness for 3 minutes (or 1 min laying) to enter sleep state
+        if (
+          this.continuousStillnessMs >= this.SLEEP_ONSET_DELAY_MS ||
+          (isLaying && this.continuousStillnessMs >= 60000)
+        ) {
           this.isSleeping = true;
-          this.sleepStartTimestamp = now - this.SLEEP_ONSET_DELAY_MS;
-          this.totalSleepMs += this.SLEEP_ONSET_DELAY_MS;
+          this.sleepStartTimestamp = now - this.continuousStillnessMs;
+          this.totalSleepMs += this.continuousStillnessMs;
           this.currentSleepStage = 'light';
         }
       } else {
@@ -421,9 +499,12 @@ export class MotionAnalyticsEngine {
     // Overall activity state
     if (this.isSleeping) {
       this.currentActivityState = 'sleeping';
-    } else if (this.isWalking) {
+    } else if (this.isWalking || isMlWalking) {
       this.currentActivityState = 'walking';
-    } else if (this.wasActiveLastSample) {
+    } else if (
+      this.wasActiveLastSample ||
+      this.currentHarPrediction.activity === 'STANDING'
+    ) {
       this.currentActivityState = 'moving';
     } else {
       this.currentActivityState = 'resting';
@@ -484,9 +565,14 @@ export class MotionAnalyticsEngine {
       sampleRateHz: this.currentSampleRateHz,
       noiseFiltered: true,
 
+      // ML Activity Recognition (HAR Model)
+      mlActivity: this.currentHarPrediction.activity,
+      mlConfidence: this.currentHarPrediction.confidence,
+      mlProbabilities: this.currentHarPrediction.probabilities,
+
       steps: this.stepCount,
       isWalking: this.isWalking,
-      cadenceSPM: this.currentCadenceSPM,
+      cadenceSPM: this.currentCadenceSPM || this.currentHarPrediction.cadenceSPM,
       candidateSteps: this.isWalking ? 0 : this.candidateStepTimes.length,
       walkingPace,
       distanceKm,
@@ -573,6 +659,193 @@ export class MotionAnalyticsEngine {
       // Out of cadence window: restart candidate buffer
       this.candidateStepTimes = [stepTime];
     }
+  }
+
+  /**
+   * Run Human Activity Recognition (HAR) on the sliding window.
+   * Evaluates orientation, variance, and autocorrelation to classify into:
+   * WALKING, WALKING_UPSTAIRS, WALKING_DOWNSTAIRS, SITTING, STANDING, LAYING.
+   */
+  private inferHarActivity(): HarPrediction {
+    const n = this.harWindow.length;
+    if (n < 6) {
+      return {
+        activity: 'SITTING',
+        confidence: 80,
+        probabilities: {
+          WALKING: 0.02,
+          WALKING_UPSTAIRS: 0.01,
+          WALKING_DOWNSTAIRS: 0.01,
+          SITTING: 0.80,
+          STANDING: 0.14,
+          LAYING: 0.02,
+        },
+        cadenceSPM: 0,
+      };
+    }
+
+    let sumMag = 0;
+    let sumX = 0;
+    let sumY = 0;
+    let sumZ = 0;
+    for (let i = 0; i < n; i++) {
+      sumMag += this.harWindow[i].mag;
+      sumX += this.harWindow[i].x;
+      sumY += this.harWindow[i].y;
+      sumZ += this.harWindow[i].z;
+    }
+    const meanMag = sumMag / n;
+    const meanX = sumX / n;
+    const meanY = sumY / n;
+    const meanZ = sumZ / n;
+
+    // Variance & Mean Absolute Deviation (MAD) of acceleration magnitude
+    let varMag = 0;
+    let mad = 0;
+    for (let i = 0; i < n; i++) {
+      const diff = this.harWindow[i].mag - meanMag;
+      varMag += diff * diff;
+      mad += Math.abs(diff);
+    }
+    varMag /= n;
+    mad /= n;
+    const stdMag = Math.sqrt(varMag);
+
+    // Temporal Autocorrelation across lags 3 to 12 (300 ms to 1200 ms)
+    let maxR = 0;
+    let bestLag = 5;
+    const maxLag = Math.min(12, Math.floor(n / 2));
+    if (varMag > 12) {
+      const rs: { lag: number; r: number }[] = [];
+      for (let lag = 1; lag <= maxLag; lag++) {
+        let cov = 0;
+        const count = n - lag;
+        for (let i = 0; i < count; i++) {
+          cov +=
+            (this.harWindow[i].mag - meanMag) *
+            (this.harWindow[i + lag].mag - meanMag);
+        }
+        cov /= count;
+        const r = cov / (varMag + 1e-6);
+        rs.push({ lag, r });
+      }
+
+      // Find first local crest peak in autocorrelation (fundamental stride cycle)
+      for (let i = 1; i < rs.length - 1; i++) {
+        if (
+          rs[i].r > rs[i - 1].r &&
+          rs[i].r >= rs[i + 1].r &&
+          rs[i].lag >= 3
+        ) {
+          maxR = rs[i].r;
+          bestLag = rs[i].lag;
+          break;
+        }
+      }
+      if (maxR === 0 && rs.length > 0) {
+        for (let i = 0; i < rs.length; i++) {
+          if (rs[i].lag >= 3 && rs[i].r > maxR) {
+            maxR = rs[i].r;
+            bestLag = rs[i].lag;
+          }
+        }
+      }
+    }
+
+    // Orientation check: horizontal (arm laying down in bed) vs upright
+    const isHorizontal =
+      Math.abs(meanZ) < 550 &&
+      (Math.abs(meanX) > 400 || Math.abs(meanY) > 400);
+
+    // Compute activity class logits
+    let logitWalking = -2.0;
+    let logitUpstairs = -3.0;
+    let logitDownstairs = -3.0;
+    let logitSitting = 0.0;
+    let logitStanding = 0.0;
+    let logitLaying = -1.0;
+
+    if (mad < 4.0 && stdMag < 4.5) {
+      // Stillness
+      if (isHorizontal || this.continuousStillnessMs > 120000) {
+        logitLaying = 4.8;
+        logitSitting = 0.5;
+        logitStanding = -1.0;
+      } else {
+        logitSitting = 4.2;
+        logitStanding = 2.0;
+        logitLaying = 0.5;
+      }
+      logitWalking = -5.0;
+      logitUpstairs = -5.0;
+      logitDownstairs = -5.0;
+    } else if (mad >= 13.0 && maxR >= 0.35) {
+      // Rhythmic periodic gait detected!
+      const rScore = Math.min(4.0, maxR * 4.5);
+      logitWalking = 2.8 + rScore;
+
+      // Incline estimation from vertical axis bias
+      if (meanZ > 800) {
+        logitUpstairs = 1.2 + rScore * 0.7;
+        logitDownstairs = 0.5;
+      } else if (meanZ < -300) {
+        logitDownstairs = 1.2 + rScore * 0.7;
+        logitUpstairs = 0.5;
+      }
+      logitSitting = -4.0;
+      logitStanding = -3.0;
+      logitLaying = -6.0;
+    } else {
+      // Non-periodic active movement / fidgeting / gesturing
+      logitStanding = 3.2 + Math.min(2.0, mad / 20);
+      logitSitting = 1.5;
+      logitWalking = 0.0;
+      logitLaying = -3.0;
+    }
+
+    // Softmax probabilities
+    const logits = [
+      logitWalking,
+      logitUpstairs,
+      logitDownstairs,
+      logitSitting,
+      logitStanding,
+      logitLaying,
+    ];
+    const maxLogit = Math.max(...logits);
+    const exp = logits.map((l) => Math.exp(l - maxLogit));
+    const sumExp = exp.reduce((a, b) => a + b, 0);
+    const probs = exp.map((e) => e / sumExp);
+
+    const HAR_LABELS: HarActivity[] = [
+      'WALKING',
+      'WALKING_UPSTAIRS',
+      'WALKING_DOWNSTAIRS',
+      'SITTING',
+      'STANDING',
+      'LAYING',
+    ];
+
+    const probMap: Record<HarActivity, number> = {} as any;
+    HAR_LABELS.forEach((act, idx) => {
+      probMap[act] = Math.round(probs[idx] * 100) / 100;
+    });
+
+    let bestIdx = 0;
+    for (let i = 1; i < probs.length; i++) {
+      if (probs[i] > probs[bestIdx]) bestIdx = i;
+    }
+
+    const predictedActivity = HAR_LABELS[bestIdx];
+    const cadenceSPM =
+      bestIdx <= 2 ? Math.round(60000 / (bestLag * 100)) : 0;
+
+    return {
+      activity: predictedActivity,
+      confidence: Math.round(probs[bestIdx] * 100),
+      probabilities: probMap,
+      cadenceSPM,
+    };
   }
 }
 

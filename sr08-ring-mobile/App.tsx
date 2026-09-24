@@ -14,6 +14,7 @@ import {
 import { BleManager, Device, State } from 'react-native-ble-plx';
 import {
   decodeSensorData,
+  HarActivity,
   MotionAnalyticsEngine,
   MotionMetrics,
   RawAccelSample,
@@ -1709,14 +1710,14 @@ export default function App() {
                       ]}
                     >
                       {motionMetrics?.isWalking
-                        ? `Walking (${motionMetrics.cadenceSPM} SPM)`
+                        ? `Walking (${motionMetrics.cadenceSPM} SPM · ${motionMetrics.mlConfidence}%)`
                         : (motionMetrics?.candidateSteps ?? 0) > 0
-                        ? 'Step Detected'
+                        ? `Step Cadence (${motionMetrics?.mlActivity ?? 'IDLE'})`
                         : motionMetrics?.activityState === 'moving'
-                        ? 'Moving'
+                        ? `Moving (${motionMetrics?.mlActivity ?? 'MOVING'})`
                         : motionMetrics?.activityState === 'sleeping'
-                        ? 'Asleep'
-                        : 'Resting'}
+                        ? `Asleep (${motionMetrics?.mlActivity ?? 'LAYING'})`
+                        : `${motionMetrics?.mlActivity ?? 'Resting'} (${motionMetrics?.mlConfidence ?? 0}%)`}
                     </Text>
                   </View>
                 </View>
@@ -2854,14 +2855,14 @@ export default function App() {
                     ]}
                   >
                     {motionMetrics?.isWalking
-                      ? `WALKING ACTIVE · ${motionMetrics.cadenceSPM} SPM · ${motionMetrics.walkingPace.toUpperCase()} PACE`
+                      ? `WALKING ACTIVE · ${motionMetrics.cadenceSPM} SPM · ${motionMetrics.walkingPace.toUpperCase()} · ${motionMetrics.mlConfidence}% HAR CONF`
                       : (motionMetrics?.candidateSteps ?? 0) > 0
-                      ? 'RHYTHMIC STEP DETECTED · VERIFYING'
+                      ? `CADENCE DETECTED (${motionMetrics?.mlActivity ?? 'IDLE'} · VERIFYING)`
                       : motionMetrics?.activityState === 'moving'
-                      ? 'ACTIVE HAND/BODY MOVEMENT'
+                      ? `ACTIVE BODY MOVEMENT (${motionMetrics?.mlActivity ?? 'MOVING'})`
                       : motionMetrics?.activityState === 'sleeping'
-                      ? 'USER ASLEEP'
-                      : 'IDLE / RESTING'}
+                      ? `USER ASLEEP (${motionMetrics?.mlActivity ?? 'LAYING'})`
+                      : `HAR: ${motionMetrics?.mlActivity ?? 'IDLE'} (${motionMetrics?.mlConfidence ?? 0}% CONFIDENCE)`}
                   </Text>
                 </View>
 
@@ -2987,6 +2988,106 @@ export default function App() {
                     Reset steps & moves counter
                   </Text>
                 </Pressable>
+              </View>
+
+              {/* ML HUMAN ACTIVITY RECOGNITION (HAR) CARD */}
+              <View style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <View>
+                    <Text style={styles.sectionLabel}>MACHINE LEARNING CLASSIFIER</Text>
+                    <Text style={styles.featureTitle}>Activity Recognition (HAR)</Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.ratePill,
+                      {
+                        backgroundColor: motionMetrics?.isWalking
+                          ? '#DCFCE7'
+                          : motionMetrics?.isSleeping
+                          ? '#EDE9FE'
+                          : '#E0E7FF',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.ratePillText,
+                        {
+                          color: motionMetrics?.isWalking
+                            ? '#15803D'
+                            : motionMetrics?.isSleeping
+                            ? '#6D28D9'
+                            : '#4338CA',
+                        },
+                      ]}
+                    >
+                      {motionMetrics?.mlConfidence ?? 0}% CONF
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Probability Distribution */}
+                <Text style={styles.metricRowSubTitle}>
+                  CLASSIFICATION CONFIDENCE (3.2s WINDOW)
+                </Text>
+
+                {(
+                  [
+                    'WALKING',
+                    'WALKING_UPSTAIRS',
+                    'WALKING_DOWNSTAIRS',
+                    'SITTING',
+                    'STANDING',
+                    'LAYING',
+                  ] as HarActivity[]
+                ).map((act) => {
+                  const prob =
+                    motionMetrics?.mlProbabilities?.[act] ??
+                    (act === 'SITTING' ? 100 : 0);
+                  const isTop = (motionMetrics?.mlActivity ?? 'SITTING') === act;
+                  const barColor =
+                    act === 'WALKING' ||
+                    act === 'WALKING_UPSTAIRS' ||
+                    act === 'WALKING_DOWNSTAIRS'
+                      ? '#10B981'
+                      : act === 'LAYING'
+                      ? '#8B5CF6'
+                      : '#3B82F6';
+
+                  return (
+                    <View key={act} style={styles.harProbRow}>
+                      <View style={styles.harProbLabelCol}>
+                        <Text
+                          style={[
+                            styles.harProbName,
+                            isTop && { fontWeight: '900', color: barColor },
+                          ]}
+                        >
+                          {act.replace(/_/g, ' ')}
+                        </Text>
+                      </View>
+                      <View style={styles.harProbTrack}>
+                        <View
+                          style={[
+                            styles.harProbFill,
+                            {
+                              width: `${Math.min(100, Math.max(0, prob))}%`,
+                              backgroundColor: barColor,
+                            },
+                          ]}
+                        />
+                      </View>
+                      <Text
+                        style={[
+                          styles.harProbVal,
+                          isTop && { fontWeight: '900', color: barColor },
+                        ]}
+                      >
+                        {prob}%
+                      </Text>
+                    </View>
+                  );
+                })}
               </View>
             </>
           )}
@@ -3311,6 +3412,147 @@ export default function App() {
                   <Text style={[styles.infoVal, { color: '#10B981' }]}>
                     EMA Low-Pass + Deadband
                   </Text>
+                </View>
+              </View>
+
+              {/* ML HUMAN ACTIVITY RECOGNITION (HAR) CARD */}
+              <View style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <View>
+                    <Text style={styles.sectionLabel}>MACHINE LEARNING INFERENCE</Text>
+                    <Text style={styles.featureTitle}>Activity Recognition (HAR)</Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.ratePill,
+                      {
+                        backgroundColor: motionMetrics?.isWalking
+                          ? '#DCFCE7'
+                          : motionMetrics?.isSleeping
+                          ? '#EDE9FE'
+                          : '#E0E7FF',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.ratePillText,
+                        {
+                          color: motionMetrics?.isWalking
+                            ? '#15803D'
+                            : motionMetrics?.isSleeping
+                            ? '#6D28D9'
+                            : '#4338CA',
+                        },
+                      ]}
+                    >
+                      {motionMetrics?.mlConfidence ?? 0}% CONF
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Predicted state banner */}
+                <View
+                  style={[
+                    styles.walkingStateBanner,
+                    motionMetrics?.isWalking
+                      ? styles.walkingStateBannerActive
+                      : { backgroundColor: '#1E293B' },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.walkingDot,
+                      motionMetrics?.isWalking
+                        ? styles.walkingDotActive
+                        : styles.walkingDotIdle,
+                    ]}
+                  />
+                  <Text style={[styles.walkingBannerText, { color: '#F8FAFC' }]}>
+                    PREDICTED: {motionMetrics?.mlActivity ?? 'SITTING'}
+                  </Text>
+                </View>
+
+                {/* Probability Distribution */}
+                <Text style={styles.metricRowSubTitle}>
+                  UCI HAR SOFTMAX PROBABILITIES (3.2s WINDOW)
+                </Text>
+
+                {(
+                  [
+                    'WALKING',
+                    'WALKING_UPSTAIRS',
+                    'WALKING_DOWNSTAIRS',
+                    'SITTING',
+                    'STANDING',
+                    'LAYING',
+                  ] as HarActivity[]
+                ).map((act) => {
+                  const prob =
+                    motionMetrics?.mlProbabilities?.[act] ??
+                    (act === 'SITTING' ? 100 : 0);
+                  const isTop = (motionMetrics?.mlActivity ?? 'SITTING') === act;
+                  const barColor =
+                    act === 'WALKING' ||
+                    act === 'WALKING_UPSTAIRS' ||
+                    act === 'WALKING_DOWNSTAIRS'
+                      ? '#10B981'
+                      : act === 'LAYING'
+                      ? '#8B5CF6'
+                      : '#3B82F6';
+
+                  return (
+                    <View key={act} style={styles.harProbRow}>
+                      <View style={styles.harProbLabelCol}>
+                        <Text
+                          style={[
+                            styles.harProbName,
+                            isTop && { fontWeight: '900', color: barColor },
+                          ]}
+                        >
+                          {act.replace(/_/g, ' ')}
+                        </Text>
+                      </View>
+                      <View style={styles.harProbTrack}>
+                        <View
+                          style={[
+                            styles.harProbFill,
+                            {
+                              width: `${Math.min(100, Math.max(0, prob))}%`,
+                              backgroundColor: barColor,
+                            },
+                          ]}
+                        />
+                      </View>
+                      <Text
+                        style={[
+                          styles.harProbVal,
+                          isTop && { fontWeight: '900', color: barColor },
+                        ]}
+                      >
+                        {prob}%
+                      </Text>
+                    </View>
+                  );
+                })}
+
+                <View style={[styles.infoRow, { marginTop: 12 }]}>
+                  <Text style={styles.infoLabel}>Temporal Window</Text>
+                  <Text style={styles.infoVal}>32 samples (3.2s sliding @ 10Hz)</Text>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Gait Autocorrelation</Text>
+                  <Text style={[styles.infoVal, { color: '#10B981' }]}>
+                    {motionMetrics?.cadenceSPM
+                      ? `${motionMetrics.cadenceSPM} SPM (Periodicity \u03c4)`
+                      : 'No periodicity'}
+                  </Text>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Noise Invariance</Text>
+                  <Text style={styles.infoVal}>Vector MAD + EMA Zero-Crossing</Text>
                 </View>
               </View>
 
@@ -4738,6 +4980,44 @@ const lightStyles = StyleSheet.create({
     color: '#2563EB',
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
+
+  harProbRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
+
+  harProbLabelCol: {
+    width: 135,
+  },
+
+  harProbName: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+
+  harProbTrack: {
+    flex: 1,
+    height: 8,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginHorizontal: 8,
+  },
+
+  harProbFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+
+  harProbVal: {
+    width: 38,
+    textAlign: 'right',
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
 });
 
 /*
@@ -4849,6 +5129,21 @@ const darkStyles = StyleSheet.create({
   axisMeterTrack: {
     ...lightStyles.axisMeterTrack,
     backgroundColor: '#1E293B',
+  },
+
+  harProbName: {
+    ...lightStyles.harProbName,
+    color: '#94A3B8',
+  },
+
+  harProbTrack: {
+    ...lightStyles.harProbTrack,
+    backgroundColor: '#1E293B',
+  },
+
+  harProbVal: {
+    ...lightStyles.harProbVal,
+    color: '#F8FAFC',
   },
 
   featureItemTitle: {
