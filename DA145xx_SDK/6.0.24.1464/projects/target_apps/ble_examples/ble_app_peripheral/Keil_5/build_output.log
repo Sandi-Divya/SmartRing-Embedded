@@ -1,0 +1,9 @@
+*** Using Compiler 'V6.24', folder: 'C:\Users\Sandali\AppData\Local\Keil_v5\ARM\ARMCLANG\Bin'
+Build target 'DA14585'
+compiling user_peripheral.c...
+linking...
+Program Size: Code=24056 RO-data=3716 RW-data=8 ZI-data=9168  
+FromELF: creating hex file...
+After Build - User command #1: fromelf --bincombined --output=".\out_DA14585\Objects\ble_app_peripheral_585.bin"  ".\out_DA14585\Objects\ble_app_peripheral_585.axf"
+".\out_DA14585\Objects\ble_app_peripheral_585.axf" - 0 Error(s), 0 Warning(s).
+Build Time Elapsed:  00:00:11

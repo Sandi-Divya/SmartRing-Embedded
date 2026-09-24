@@ -12,6 +12,12 @@ import {
   View,
 } from 'react-native';
 import { BleManager, Device, State } from 'react-native-ble-plx';
+import {
+  decodeSensorData,
+  MotionAnalyticsEngine,
+  MotionMetrics,
+  RawAccelSample,
+} from './motionAnalytics';
 
 const RING_NAME = 'DLG-PRPH';
 const RING_MAC_PREFIX = '48:23:35';
@@ -30,6 +36,11 @@ const HEART_RATE_CHARACTERISTIC =
 
 const CLOCK_CHARACTERISTIC =
   '25005991-b131-3396-014c-664c9867b920';
+
+const SENSOR_CHARACTERISTIC =
+  '14005991-b131-3396-014c-664c9867b917';
+
+export type TabType = 'home' | 'activity' | 'sleep' | 'heartRate' | 'sensors';
 
 type HeartRateReading = {
   value: number;
@@ -218,7 +229,10 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   const [activeTab, setActiveTab] =
-    useState<'home' | 'heartRate'>('home');
+    useState<TabType>('home');
+
+  const motionEngineRef = useRef(new MotionAnalyticsEngine());
+  const [motionMetrics, setMotionMetrics] = useState<MotionMetrics | null>(null);
 
   /*
    * IMPORTANT:
@@ -235,6 +249,7 @@ export default function App() {
 
   const batterySubscriptionRef = useRef<any>(null);
   const heartRateSubscriptionRef = useRef<any>(null);
+  const sensorSubscriptionRef = useRef<any>(null);
   const disconnectSubscriptionRef = useRef<any>(null);
 
   const styles = isDarkMode ? darkStyles : lightStyles;
@@ -270,10 +285,12 @@ export default function App() {
   const clearSubscriptions = () => {
     batterySubscriptionRef.current?.remove();
     heartRateSubscriptionRef.current?.remove();
+    sensorSubscriptionRef.current?.remove();
     disconnectSubscriptionRef.current?.remove();
 
     batterySubscriptionRef.current = null;
     heartRateSubscriptionRef.current = null;
+    sensorSubscriptionRef.current = null;
     disconnectSubscriptionRef.current = null;
   };
 
@@ -513,9 +530,11 @@ export default function App() {
 
             batterySubscriptionRef.current?.remove();
             heartRateSubscriptionRef.current?.remove();
+            sensorSubscriptionRef.current?.remove();
 
             batterySubscriptionRef.current = null;
             heartRateSubscriptionRef.current = null;
+            sensorSubscriptionRef.current = null;
 
             setDevice(null);
             setBattery(null);
@@ -704,6 +723,105 @@ export default function App() {
                   }
                 }
               );
+        }
+
+        /*
+         * ========================================================
+         * MOTION SENSOR (ACCELEROMETER) STREAM
+         * ========================================================
+         */
+
+        const cleanUuid = (u: string) =>
+          u.toLowerCase().replace(/[^a-f0-9]/g, '');
+
+        let sensorServiceUuid = HEART_RATE_SERVICE;
+        let sensorCharacteristic = characteristics.find(
+          (characteristic) =>
+            cleanUuid(characteristic.uuid) ===
+            cleanUuid(SENSOR_CHARACTERISTIC)
+        );
+
+        // Fallback: If not immediately found in HR service, search all discovered services
+        if (!sensorCharacteristic) {
+          console.log('Searching all services for sensor characteristic...');
+          for (const s of services) {
+            try {
+              const chars = await s.characteristics();
+              const match = chars.find(
+                (c) => cleanUuid(c.uuid) === cleanUuid(SENSOR_CHARACTERISTIC)
+              );
+              if (match) {
+                sensorCharacteristic = match;
+                sensorServiceUuid = s.uuid;
+                console.log(
+                  'Sensor characteristic found in service:',
+                  s.uuid,
+                  'uuid:',
+                  match.uuid
+                );
+                break;
+              }
+            } catch (err) {
+              console.log('Error checking service characteristics:', s.uuid, err);
+            }
+          }
+        }
+
+        if (!sensorCharacteristic) {
+          console.log('Motion sensor characteristic not found anywhere on device');
+        } else {
+          console.log(
+            'Motion sensor characteristic found:',
+            sensorCharacteristic.uuid,
+            'under service:',
+            sensorServiceUuid
+          );
+
+          if (sensorCharacteristic.isReadable) {
+            try {
+              const readValue =
+                await discoveredDevice.readCharacteristicForService(
+                  sensorServiceUuid,
+                  sensorCharacteristic.uuid
+                );
+
+              if (readValue?.value) {
+                const sample = decodeSensorData(readValue.value);
+                if (sample) {
+                  const metrics =
+                    motionEngineRef.current.processSample(sample);
+                  setMotionMetrics({ ...metrics });
+                }
+              }
+            } catch (err) {
+              console.log('Initial sensor read error:', err);
+            }
+          }
+
+          sensorSubscriptionRef.current?.remove();
+
+          sensorSubscriptionRef.current =
+            discoveredDevice.monitorCharacteristicForService(
+              sensorServiceUuid,
+              sensorCharacteristic.uuid,
+              (error, characteristic) => {
+                if (error) {
+                  console.log('Motion sensor notification error:', error);
+                  return;
+                }
+
+                if (!characteristic?.value) {
+                  return;
+                }
+
+                const sample = decodeSensorData(characteristic.value);
+                if (sample) {
+                  const metrics =
+                    motionEngineRef.current.processSample(sample);
+                  setMotionMetrics({ ...metrics });
+                }
+              }
+            );
         }
       }
 
@@ -1201,30 +1319,23 @@ export default function App() {
 
           {/* TABS */}
 
-          <View
-            style={
-              styles.tabContainer
-            }
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.tabScrollContainer}
+            style={styles.tabScrollView}
           >
             <Pressable
               style={[
-                styles.tab,
-                activeTab ===
-                  'home' &&
-                  styles.activeTab,
+                styles.segmentedTab,
+                activeTab === 'home' && styles.activeSegmentedTab,
               ]}
-              onPress={() =>
-                setActiveTab(
-                  'home'
-                )
-              }
+              onPress={() => setActiveTab('home')}
             >
               <Text
                 style={[
-                  styles.tabText,
-                  activeTab ===
-                    'home' &&
-                    styles.activeTabText,
+                  styles.segmentedTabText,
+                  activeTab === 'home' && styles.activeSegmentedTabText,
                 ]}
               >
                 Home
@@ -1233,29 +1344,72 @@ export default function App() {
 
             <Pressable
               style={[
-                styles.tab,
-                activeTab ===
-                  'heartRate' &&
-                  styles.activeTab,
+                styles.segmentedTab,
+                activeTab === 'activity' && styles.activeSegmentedTab,
               ]}
-              onPress={() =>
-                setActiveTab(
-                  'heartRate'
-                )
-              }
+              onPress={() => setActiveTab('activity')}
             >
               <Text
                 style={[
-                  styles.tabText,
-                  activeTab ===
-                    'heartRate' &&
-                    styles.activeTabText,
+                  styles.segmentedTabText,
+                  activeTab === 'activity' && styles.activeSegmentedTabText,
+                ]}
+              >
+                Activity & Steps
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.segmentedTab,
+                activeTab === 'sleep' && styles.activeSegmentedTab,
+              ]}
+              onPress={() => setActiveTab('sleep')}
+            >
+              <Text
+                style={[
+                  styles.segmentedTabText,
+                  activeTab === 'sleep' && styles.activeSegmentedTabText,
+                ]}
+              >
+                Sleep Time
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.segmentedTab,
+                activeTab === 'heartRate' && styles.activeSegmentedTab,
+              ]}
+              onPress={() => setActiveTab('heartRate')}
+            >
+              <Text
+                style={[
+                  styles.segmentedTabText,
+                  activeTab === 'heartRate' && styles.activeSegmentedTabText,
                 ]}
               >
                 Heart Rate
               </Text>
             </Pressable>
-          </View>
+
+            <Pressable
+              style={[
+                styles.segmentedTab,
+                activeTab === 'sensors' && styles.activeSegmentedTab,
+              ]}
+              onPress={() => setActiveTab('sensors')}
+            >
+              <Text
+                style={[
+                  styles.segmentedTabText,
+                  activeTab === 'sensors' && styles.activeSegmentedTabText,
+                ]}
+              >
+                Sensors
+              </Text>
+            </Pressable>
+          </ScrollView>
 
           {/* ==================================================
               HOME
@@ -1526,128 +1680,222 @@ export default function App() {
                 </Pressable>
               </View>
 
-              {/* COMING ONLINE */}
+              {/* ==================================================
+                  ACTIVITY & STEPS OVERVIEW
+                  ================================================== */}
 
-              <Text
-                style={
-                  styles.sectionHeading
-                }
-              >
-                COMING ONLINE
-              </Text>
-
-              <View
-                style={
-                  styles.featureCard
-                }
-              >
-                <View
-                  style={
-                    styles.featureIconBox
-                  }
-                >
-                  <Text
-                    style={
-                      styles.featureIcon
-                    }
+              <View style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <View>
+                    <Text style={styles.sectionLabel}>ACTIVITY & WALKING</Text>
+                    <Text style={styles.featureTitle}>Steps & Movement</Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.walkingPill,
+                      motionMetrics?.isWalking ? styles.walkingPillActive : styles.walkingPillIdle,
+                    ]}
                   >
-                    ♥
-                  </Text>
+                    <View
+                      style={[
+                        styles.walkingDot,
+                        motionMetrics?.isWalking ? styles.walkingDotActive : styles.walkingDotIdle,
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.walkingPillText,
+                        motionMetrics?.isWalking ? styles.walkingPillTextActive : styles.walkingPillTextIdle,
+                      ]}
+                    >
+                      {motionMetrics?.isWalking
+                        ? `Walking (${motionMetrics.cadenceSPM} SPM)`
+                        : motionMetrics?.activityState === 'moving'
+                        ? 'Moving'
+                        : motionMetrics?.activityState === 'sleeping'
+                        ? 'Asleep'
+                        : 'Resting'}
+                    </Text>
+                  </View>
                 </View>
 
-                <View
-                  style={
-                    styles.featureContent
-                  }
-                >
-                  <Text
-                    style={
-                      styles.featureTitle
-                    }
-                  >
-                    Heart rate
+                <View style={styles.stepsRow}>
+                  <Text style={styles.stepsValueBig}>
+                    {motionMetrics ? motionMetrics.steps.toLocaleString() : '0'}
                   </Text>
-
-                  <Text
-                    style={
-                      styles.featureDescription
-                    }
-                  >
-                    Continuous heart rate
-                    monitoring and analysis.
-                  </Text>
+                  <Text style={styles.stepsUnitLabel}>STEPS</Text>
                 </View>
 
-                <View
-                  style={
-                    styles.liveBadge
-                  }
-                >
-                  <Text
-                    style={
-                      styles.liveBadgeText
-                    }
-                  >
-                    LIVE
-                  </Text>
+                <View style={styles.progressBarContainer}>
+                  <View
+                    style={[
+                      styles.progressBarFill,
+                      {
+                        width: `${Math.min(
+                          100,
+                          Math.round(((motionMetrics?.steps ?? 0) / 10000) * 100)
+                        )}%`,
+                      },
+                    ]}
+                  />
                 </View>
+
+                <View style={styles.quickMetricsRow}>
+                  <View style={styles.quickMetricCol}>
+                    <Text style={styles.quickMetricLabel}>DISTANCE</Text>
+                    <Text style={styles.quickMetricVal}>
+                      {motionMetrics?.distanceKm ?? '0.00'} km
+                    </Text>
+                  </View>
+                  <View style={styles.quickMetricCol}>
+                    <Text style={styles.quickMetricLabel}>CALORIES</Text>
+                    <Text style={styles.quickMetricVal}>
+                      {motionMetrics?.caloriesKcal ?? 0} kcal
+                    </Text>
+                  </View>
+                  <View style={styles.quickMetricCol}>
+                    <Text style={styles.quickMetricLabel}>MOVES</Text>
+                    <Text style={styles.quickMetricVal}>
+                      {motionMetrics?.movesCount ?? 0}
+                    </Text>
+                  </View>
+                  <View style={styles.quickMetricCol}>
+                    <Text style={styles.quickMetricLabel}>ACTIVE</Text>
+                    <Text style={styles.quickMetricVal}>
+                      {motionMetrics?.activeMinutes ?? 0}m
+                    </Text>
+                  </View>
+                </View>
+
+                <Pressable
+                  style={styles.secondaryButton}
+                  onPress={() => setActiveTab('activity')}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    View activity & steps analysis
+                  </Text>
+                </Pressable>
               </View>
 
-              <View
-                style={
-                  styles.featureCard
-                }
-              >
-                <View
-                  style={
-                    styles.featureIconBox
-                  }
-                >
-                  <Text
-                    style={
-                      styles.featureIcon
-                    }
+              {/* ==================================================
+                  SLEEP TIME OVERVIEW
+                  ================================================== */}
+
+              <View style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <View>
+                    <Text style={styles.sectionLabel}>SLEEP TRACKING</Text>
+                    <Text style={styles.featureTitle}>Sleep Time & Quality</Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.sleepStagePill,
+                      motionMetrics?.isSleeping
+                        ? styles.sleepStagePillAsleep
+                        : styles.sleepStagePillAwake,
+                    ]}
                   >
-                    ◷
+                    <Text
+                      style={[
+                        styles.sleepStagePillText,
+                        motionMetrics?.isSleeping
+                          ? styles.sleepStagePillTextAsleep
+                          : styles.sleepStagePillTextAwake,
+                      ]}
+                    >
+                      {motionMetrics?.isSleeping
+                        ? `SLEEPING (${motionMetrics.sleepStage.toUpperCase()})`
+                        : 'AWAKE'}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.sleepHeroRow}>
+                  <Text style={styles.sleepValueBig}>
+                    {Math.floor((motionMetrics?.sleepMinutes ?? 0) / 60)}h{' '}
+                    {(motionMetrics?.sleepMinutes ?? 0) % 60}m
+                  </Text>
+                  <View style={styles.sleepScoreBadge}>
+                    <Text style={styles.sleepScoreBadgeText}>
+                      Score: {motionMetrics?.sleepScore ?? 0}%
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.quickMetricsRow}>
+                  <View style={styles.quickMetricCol}>
+                    <Text style={styles.quickMetricLabel}>DEEP SLEEP</Text>
+                    <Text style={styles.quickMetricVal}>
+                      {Math.floor((motionMetrics?.deepSleepMinutes ?? 0) / 60)}h{' '}
+                      {(motionMetrics?.deepSleepMinutes ?? 0) % 60}m
+                    </Text>
+                  </View>
+                  <View style={styles.quickMetricCol}>
+                    <Text style={styles.quickMetricLabel}>LIGHT SLEEP</Text>
+                    <Text style={styles.quickMetricVal}>
+                      {Math.floor((motionMetrics?.lightSleepMinutes ?? 0) / 60)}h{' '}
+                      {(motionMetrics?.lightSleepMinutes ?? 0) % 60}m
+                    </Text>
+                  </View>
+                  <View style={styles.quickMetricCol}>
+                    <Text style={styles.quickMetricLabel}>RESTLESS</Text>
+                    <Text style={styles.quickMetricVal}>
+                      {motionMetrics?.restlessEvents ?? 0}
+                    </Text>
+                  </View>
+                </View>
+
+                <Pressable
+                  style={styles.secondaryButton}
+                  onPress={() => setActiveTab('sleep')}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    View sleep time analysis
+                  </Text>
+                </Pressable>
+              </View>
+
+              {/* ==================================================
+                  LIVE SENSOR MONITOR OVERVIEW
+                  ================================================== */}
+
+              <View style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <View>
+                    <Text style={styles.sectionLabel}>LIVE SENSORS</Text>
+                    <Text style={styles.featureTitle}>3-Axis Accelerometer</Text>
+                  </View>
+                  <View style={styles.ratePill}>
+                    <Text style={styles.ratePillText}>
+                      {motionMetrics?.sampleRateHz ?? 10} Hz
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.sensorRowHome}>
+                  <Text style={styles.sensorCoordText}>
+                    X: <Text style={styles.sensorCoordVal}>{motionMetrics?.latestSample?.x ?? 0}</Text>
+                  </Text>
+                  <Text style={styles.sensorCoordText}>
+                    Y: <Text style={styles.sensorCoordVal}>{motionMetrics?.latestSample?.y ?? 0}</Text>
+                  </Text>
+                  <Text style={styles.sensorCoordText}>
+                    Z: <Text style={styles.sensorCoordVal}>{motionMetrics?.latestSample?.z ?? 0}</Text>
                   </Text>
                 </View>
 
-                <View
-                  style={
-                    styles.featureContent
-                  }
-                >
-                  <Text
-                    style={
-                      styles.featureTitle
-                    }
-                  >
-                    Sleep timer
-                  </Text>
+                <Text style={styles.mutedText}>
+                  Packets: {motionMetrics?.packetsReceived ?? 0} · Magnitude: {motionMetrics?.magnitude ?? 0}
+                </Text>
 
-                  <Text
-                    style={
-                      styles.featureDescription
-                    }
-                  >
-                    Sleep tracking will be
-                    available soon.
-                  </Text>
-                </View>
-
-                <View
-                  style={
-                    styles.soonBadge
-                  }
+                <Pressable
+                  style={styles.secondaryButton}
+                  onPress={() => setActiveTab('sensors')}
                 >
-                  <Text
-                    style={
-                      styles.soonBadgeText
-                    }
-                  >
-                    SOON
+                  <Text style={styles.secondaryButtonText}>
+                    View sensor diagnostics
                   </Text>
-                </View>
+                </Pressable>
               </View>
 
               {telemetry !==
@@ -2550,6 +2798,520 @@ export default function App() {
                   Clear analysis history
                 </Text>
               </Pressable>
+            </>
+          )}
+
+          {/* ==================================================
+              ACTIVITY & WALKING TAB
+              ================================================== */}
+
+          {activeTab === 'activity' && (
+            <>
+              <View style={styles.analysisHeader}>
+                <Text style={styles.analysisTitle}>
+                  Activity & Walking Analysis
+                </Text>
+                <Text style={styles.analysisSubtitle}>
+                  Real-time step counting, walking cadence, and movement classification
+                </Text>
+              </View>
+
+              {/* HERO STEP COUNT & WALKING */}
+              <View style={styles.heroCard}>
+                <Text style={styles.sectionLabelDark}>DAILY WALKING STEPS</Text>
+                <View style={styles.heroRowBig}>
+                  <Text style={styles.heroValueGiant}>
+                    {motionMetrics ? motionMetrics.steps.toLocaleString() : '0'}
+                  </Text>
+                  <Text style={styles.heroUnitGiant}>STEPS</Text>
+                </View>
+
+                {/* Walking State Banner */}
+                <View
+                  style={[
+                    styles.walkingStateBanner,
+                    motionMetrics?.isWalking
+                      ? styles.walkingStateBannerActive
+                      : styles.walkingStateBannerIdle,
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.walkingDot,
+                      motionMetrics?.isWalking
+                        ? styles.walkingDotActive
+                        : styles.walkingDotIdle,
+                    ]}
+                  />
+                  <Text
+                    style={[
+                      styles.walkingBannerText,
+                      motionMetrics?.isWalking
+                        ? styles.walkingBannerTextActive
+                        : styles.walkingBannerTextIdle,
+                    ]}
+                  >
+                    {motionMetrics?.isWalking
+                      ? `WALKING ACTIVE · ${motionMetrics.cadenceSPM} SPM · ${motionMetrics.walkingPace.toUpperCase()} PACE`
+                      : motionMetrics?.activityState === 'moving'
+                      ? 'ACTIVE HAND/BODY MOVEMENT'
+                      : motionMetrics?.activityState === 'sleeping'
+                      ? 'USER ASLEEP'
+                      : 'IDLE / RESTING'}
+                  </Text>
+                </View>
+
+                {/* Progress bar towards 10,000 steps */}
+                <View style={styles.progressBarContainer}>
+                  <View
+                    style={[
+                      styles.progressBarFill,
+                      {
+                        width: `${Math.min(
+                          100,
+                          Math.round(((motionMetrics?.steps ?? 0) / 10000) * 100)
+                        )}%`,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.progressSubtext}>
+                  {Math.round(((motionMetrics?.steps ?? 0) / 10000) * 100)}% of 10,000 daily step goal
+                </Text>
+
+                {/* 4-Item Metrics Grid */}
+                <View style={styles.statsGrid}>
+                  <View style={styles.statsGridItem}>
+                    <Text style={styles.statsGridLabel}>DISTANCE</Text>
+                    <Text style={styles.statsGridValue}>
+                      {motionMetrics?.distanceKm ?? '0.00'} km
+                    </Text>
+                  </View>
+                  <View style={styles.statsGridItem}>
+                    <Text style={styles.statsGridLabel}>EST. CALORIES</Text>
+                    <Text style={styles.statsGridValue}>
+                      {motionMetrics?.caloriesKcal ?? 0} kcal
+                    </Text>
+                  </View>
+                  <View style={styles.statsGridItem}>
+                    <Text style={styles.statsGridLabel}>CADENCE</Text>
+                    <Text style={styles.statsGridValue}>
+                      {motionMetrics?.cadenceSPM ?? 0} SPM
+                    </Text>
+                  </View>
+                  <View style={styles.statsGridItem}>
+                    <Text style={styles.statsGridLabel}>WALKING TIME</Text>
+                    <Text style={styles.statsGridValue}>
+                      {Math.floor((motionMetrics?.walkingDurationSeconds ?? 0) / 60)}m{' '}
+                      {(motionMetrics?.walkingDurationSeconds ?? 0) % 60}s
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* MOVES & ACTIVITY BREAKDOWN */}
+              <View style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <View>
+                    <Text style={styles.sectionLabel}>MOVEMENT TRACKING</Text>
+                    <Text style={styles.featureTitle}>Moves & Active Time</Text>
+                  </View>
+                  <View style={styles.badgePillNeutral}>
+                    <Text style={styles.badgePillTextNeutral}>
+                      {motionMetrics?.activityState?.toUpperCase() ?? 'RESTING'}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.statsGrid}>
+                  <View style={styles.statsGridItem}>
+                    <Text style={styles.statsGridLabel}>TOTAL MOVES</Text>
+                    <Text style={styles.statsGridValue}>
+                      {motionMetrics?.movesCount ?? 0}
+                    </Text>
+                    <Text style={styles.statsGridSub}>Active bursts</Text>
+                  </View>
+                  <View style={styles.statsGridItem}>
+                    <Text style={styles.statsGridLabel}>ACTIVE TIME</Text>
+                    <Text style={styles.statsGridValue}>
+                      {motionMetrics?.activeMinutes ?? 0} min
+                    </Text>
+                    <Text style={styles.statsGridSub}>Non-sedentary</Text>
+                  </View>
+                  <View style={styles.statsGridItem}>
+                    <Text style={styles.statsGridLabel}>RESTING TIME</Text>
+                    <Text style={styles.statsGridValue}>
+                      {motionMetrics?.restingMinutes ?? 0} min
+                    </Text>
+                    <Text style={styles.statsGridSub}>Still / Seated</Text>
+                  </View>
+                  <View style={styles.statsGridItem}>
+                    <Text style={styles.statsGridLabel}>INTENSITY</Text>
+                    <Text style={styles.statsGridValue}>
+                      {motionMetrics?.motionIntensityPercent ?? 0}%
+                    </Text>
+                    <Text style={styles.statsGridSub}>Current effort</Text>
+                  </View>
+                </View>
+
+                {/* Intensity Live Meter */}
+                <Text style={styles.metricRowSubTitle}>LIVE MOVEMENT INTENSITY</Text>
+                <View style={styles.intensityBarContainer}>
+                  <View
+                    style={[
+                      styles.intensityBarFill,
+                      { width: `${motionMetrics?.motionIntensityPercent ?? 0}%` },
+                    ]}
+                  />
+                </View>
+
+                {/* Reset button for testing */}
+                <Pressable
+                  style={styles.secondaryButton}
+                  onPress={() => {
+                    motionEngineRef.current.resetSteps();
+                    motionEngineRef.current.resetMoves();
+                    if (motionMetrics?.latestSample) {
+                      const updated = motionEngineRef.current.processSample(
+                        motionMetrics.latestSample
+                      );
+                      setMotionMetrics({ ...updated });
+                    }
+                  }}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    Reset steps & moves counter
+                  </Text>
+                </Pressable>
+              </View>
+            </>
+          )}
+
+          {/* ==================================================
+              SLEEP TIME TAB
+              ================================================== */}
+
+          {activeTab === 'sleep' && (
+            <>
+              <View style={styles.analysisHeader}>
+                <Text style={styles.analysisTitle}>
+                  Sleep Time & Rest Analysis
+                </Text>
+                <Text style={styles.analysisSubtitle}>
+                  Inactivity detection, sleep duration tracking, and restful stage classification
+                </Text>
+              </View>
+
+              {/* HERO SLEEP TIMER CARD */}
+              <View style={styles.heroCard}>
+                <Text style={styles.sectionLabelDark}>TOTAL SLEEP DURATION</Text>
+                <View style={styles.heroRowBig}>
+                  <Text style={styles.heroValueGiant}>
+                    {Math.floor((motionMetrics?.sleepMinutes ?? 0) / 60)}h{' '}
+                    {(motionMetrics?.sleepMinutes ?? 0) % 60}m
+                  </Text>
+                </View>
+
+                <View style={styles.sleepBannerRow}>
+                  <View
+                    style={[
+                      styles.sleepStagePill,
+                      motionMetrics?.isSleeping
+                        ? styles.sleepStagePillAsleep
+                        : styles.sleepStagePillAwake,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.sleepStagePillText,
+                        motionMetrics?.isSleeping
+                          ? styles.sleepStagePillTextAsleep
+                          : styles.sleepStagePillTextAwake,
+                      ]}
+                    >
+                      {motionMetrics?.isSleeping
+                        ? `SLEEPING (${motionMetrics.sleepStage.toUpperCase()})`
+                        : 'AWAKE'}
+                    </Text>
+                  </View>
+
+                  <View style={styles.sleepScoreBadge}>
+                    <Text style={styles.sleepScoreBadgeText}>
+                      Quality: {motionMetrics?.sleepScore ?? 0}%
+                    </Text>
+                  </View>
+                </View>
+
+                <Text style={styles.progressSubtext}>
+                  {motionMetrics?.isSleeping
+                    ? 'User is sleeping. Accelerometer tracking continuous stillness.'
+                    : 'Awake. Sleep tracking begins automatically after 3 minutes of stillness.'}
+                </Text>
+
+                {/* Sleep Metrics Grid */}
+                <View style={styles.statsGrid}>
+                  <View style={styles.statsGridItem}>
+                    <Text style={styles.statsGridLabel}>DEEP SLEEP</Text>
+                    <Text style={styles.statsGridValue}>
+                      {Math.floor((motionMetrics?.deepSleepMinutes ?? 0) / 60)}h{' '}
+                      {(motionMetrics?.deepSleepMinutes ?? 0) % 60}m
+                    </Text>
+                    <Text style={styles.statsGridSub}>High stillness</Text>
+                  </View>
+                  <View style={styles.statsGridItem}>
+                    <Text style={styles.statsGridLabel}>LIGHT SLEEP</Text>
+                    <Text style={styles.statsGridValue}>
+                      {Math.floor((motionMetrics?.lightSleepMinutes ?? 0) / 60)}h{' '}
+                      {(motionMetrics?.lightSleepMinutes ?? 0) % 60}m
+                    </Text>
+                    <Text style={styles.statsGridSub}>Restful sleep</Text>
+                  </View>
+                  <View style={styles.statsGridItem}>
+                    <Text style={styles.statsGridLabel}>RESTLESS EVENTS</Text>
+                    <Text style={styles.statsGridValue}>
+                      {motionMetrics?.restlessEvents ?? 0}
+                    </Text>
+                    <Text style={styles.statsGridSub}>Toss & turns</Text>
+                  </View>
+                  <View style={styles.statsGridItem}>
+                    <Text style={styles.statsGridLabel}>SESSION START</Text>
+                    <Text style={styles.statsGridValue}>
+                      {motionMetrics?.sleepSessionStart
+                        ? motionMetrics.sleepSessionStart.toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                        : '--:--'}
+                    </Text>
+                    <Text style={styles.statsGridSub}>Detected onset</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* SLEEP STAGE EXPLANATION & ACTIONS */}
+              <View style={styles.card}>
+                <Text style={styles.sectionLabel}>SLEEP ALGORITHM INSIGHTS</Text>
+                <Text style={styles.featureTitle}>How Your Ring Analyzes Sleep</Text>
+
+                <View style={styles.featureItemRow}>
+                  <Text style={styles.featureBullet}>🌙</Text>
+                  <View style={styles.featureItemTextCol}>
+                    <Text style={styles.featureItemTitle}>Automated Onset Detection</Text>
+                    <Text style={styles.featureItemDesc}>
+                      The ring streams 10 Hz motion data over BLE. When 3 continuous minutes of motionless rest are detected, sleep recording starts.
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.featureItemRow}>
+                  <Text style={styles.featureBullet}>🧠</Text>
+                  <View style={styles.featureItemTextCol}>
+                    <Text style={styles.featureItemTitle}>Deep vs Light Sleep Stages</Text>
+                    <Text style={styles.featureItemDesc}>
+                      Extremely low motion variance for over 10 minutes is classified as Deep Sleep, while small micro-shifts are classified as Light Sleep.
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.featureItemRow}>
+                  <Text style={styles.featureBullet}>⚡</Text>
+                  <View style={styles.featureItemTextCol}>
+                    <Text style={styles.featureItemTitle}>Restlessness & Wake Detection</Text>
+                    <Text style={styles.featureItemDesc}>
+                      Brief night movements are recorded as restlessness without interrupting your sleep session. Sustained motion wakes the sleep timer.
+                    </Text>
+                  </View>
+                </View>
+
+                <Pressable
+                  style={styles.secondaryButton}
+                  onPress={() => {
+                    motionEngineRef.current.resetSleep();
+                    if (motionMetrics?.latestSample) {
+                      const updated = motionEngineRef.current.processSample(
+                        motionMetrics.latestSample
+                      );
+                      setMotionMetrics({ ...updated });
+                    }
+                  }}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    Reset sleep tracker session
+                  </Text>
+                </Pressable>
+              </View>
+            </>
+          )}
+
+          {/* ==================================================
+              SENSORS TAB
+              ================================================== */}
+
+          {activeTab === 'sensors' && (
+            <>
+              <View style={styles.analysisHeader}>
+                <Text style={styles.analysisTitle}>
+                  Live Sensor Stream Diagnostics
+                </Text>
+                <Text style={styles.analysisSubtitle}>
+                  Real-time ADXL362 3-axis accelerometer data received over BLE
+                </Text>
+              </View>
+
+              {/* 3-AXIS ACCELEROMETER CARD */}
+              <View style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <View>
+                    <Text style={styles.sectionLabel}>RAW ACCELEROMETER</Text>
+                    <Text style={styles.featureTitle}>3-Axis Readings</Text>
+                  </View>
+                  <View style={styles.ratePill}>
+                    <Text style={styles.ratePillText}>
+                      {motionMetrics?.sampleRateHz ?? 10} Hz Stream
+                    </Text>
+                  </View>
+                </View>
+
+                {/* X Axis */}
+                <View style={styles.axisMeterRow}>
+                  <View style={styles.axisMeterLabelCol}>
+                    <Text style={styles.axisMeterName}>X AXIS</Text>
+                    <Text style={styles.axisMeterVal}>
+                      {motionMetrics?.latestSample?.x ?? 0}
+                    </Text>
+                  </View>
+                  <View style={styles.axisMeterTrack}>
+                    <View
+                      style={[
+                        styles.axisMeterFill,
+                        {
+                          width: `${Math.min(
+                            100,
+                            Math.max(
+                              0,
+                              50 + ((motionMetrics?.latestSample?.x ?? 0) / 2048) * 50
+                            )
+                          )}%`,
+                          backgroundColor: '#3B82F6',
+                        },
+                      ]}
+                    />
+                  </View>
+                </View>
+
+                {/* Y Axis */}
+                <View style={styles.axisMeterRow}>
+                  <View style={styles.axisMeterLabelCol}>
+                    <Text style={styles.axisMeterName}>Y AXIS</Text>
+                    <Text style={styles.axisMeterVal}>
+                      {motionMetrics?.latestSample?.y ?? 0}
+                    </Text>
+                  </View>
+                  <View style={styles.axisMeterTrack}>
+                    <View
+                      style={[
+                        styles.axisMeterFill,
+                        {
+                          width: `${Math.min(
+                            100,
+                            Math.max(
+                              0,
+                              50 + ((motionMetrics?.latestSample?.y ?? 0) / 2048) * 50
+                            )
+                          )}%`,
+                          backgroundColor: '#10B981',
+                        },
+                      ]}
+                    />
+                  </View>
+                </View>
+
+                {/* Z Axis */}
+                <View style={styles.axisMeterRow}>
+                  <View style={styles.axisMeterLabelCol}>
+                    <Text style={styles.axisMeterName}>Z AXIS</Text>
+                    <Text style={styles.axisMeterVal}>
+                      {motionMetrics?.latestSample?.z ?? 0}
+                    </Text>
+                  </View>
+                  <View style={styles.axisMeterTrack}>
+                    <View
+                      style={[
+                        styles.axisMeterFill,
+                        {
+                          width: `${Math.min(
+                            100,
+                            Math.max(
+                              0,
+                              50 + ((motionMetrics?.latestSample?.z ?? 0) / 2048) * 50
+                            )
+                          )}%`,
+                          backgroundColor: '#8B5CF6',
+                        },
+                      ]}
+                    />
+                  </View>
+                </View>
+
+                {/* Vector Magnitude & Delta */}
+                <View style={styles.statsGrid}>
+                  <View style={styles.statsGridItem}>
+                    <Text style={styles.statsGridLabel}>MAGNITUDE (SVM)</Text>
+                    <Text style={styles.statsGridValue}>
+                      {motionMetrics?.magnitude ?? 0}
+                    </Text>
+                    <Text style={styles.statsGridSub}>√(X²+Y²+Z²)</Text>
+                  </View>
+                  <View style={styles.statsGridItem}>
+                    <Text style={styles.statsGridLabel}>MOTION DELTA</Text>
+                    <Text style={styles.statsGridValue}>
+                      {motionMetrics?.motionDelta ?? 0}
+                    </Text>
+                    <Text style={styles.statsGridSub}>|ΔX|+|ΔY|+|ΔZ|</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* BLE STREAM STATS CARD */}
+              <View style={styles.card}>
+                <Text style={styles.sectionLabel}>STREAM TELEMETRY</Text>
+                <Text style={styles.featureTitle}>BLE GATT Connection Info</Text>
+
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Packets Received</Text>
+                  <Text style={styles.infoVal}>
+                    {motionMetrics?.packetsReceived ?? 0} packets
+                  </Text>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Latest Sequence</Text>
+                  <Text style={styles.infoVal}>
+                    #{motionMetrics?.latestSample?.seq ?? 0}
+                  </Text>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Effective Sample Rate</Text>
+                  <Text style={styles.infoVal}>
+                    {motionMetrics?.sampleRateHz ?? 0} Hz (~100 ms)
+                  </Text>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Sensor Characteristic</Text>
+                  <Text style={styles.infoValMono}>
+                    {SENSOR_CHARACTERISTIC}
+                  </Text>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Service UUID</Text>
+                  <Text style={styles.infoValMono}>
+                    {HEART_RATE_SERVICE}
+                  </Text>
+                </View>
+              </View>
             </>
           )}
 
@@ -3460,6 +4222,480 @@ const lightStyles = StyleSheet.create({
     fontSize: 10,
     color: '#94A3B8',
   },
+
+  tabScrollView: {
+    marginBottom: 18,
+  },
+
+  tabScrollContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 2,
+  },
+
+  segmentedTab: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 12,
+    backgroundColor: '#E2E8F0',
+    marginRight: 8,
+  },
+
+  activeSegmentedTab: {
+    backgroundColor: '#0F172A',
+  },
+
+  segmentedTabText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+
+  activeSegmentedTabText: {
+    color: '#FFFFFF',
+  },
+
+  walkingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+
+  walkingPillActive: {
+    backgroundColor: '#DCFCE7',
+  },
+
+  walkingPillIdle: {
+    backgroundColor: '#F1F5F9',
+  },
+
+  walkingDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    marginRight: 6,
+  },
+
+  walkingDotActive: {
+    backgroundColor: '#16A34A',
+  },
+
+  walkingDotIdle: {
+    backgroundColor: '#94A3B8',
+  },
+
+  walkingPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
+  walkingPillTextActive: {
+    color: '#15803D',
+  },
+
+  walkingPillTextIdle: {
+    color: '#64748B',
+  },
+
+  stepsRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+
+  stepsValueBig: {
+    fontSize: 38,
+    fontWeight: '900',
+    letterSpacing: -1,
+    color: '#0F172A',
+  },
+
+  stepsUnitLabel: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#64748B',
+    marginLeft: 8,
+    letterSpacing: 1,
+  },
+
+  progressBarContainer: {
+    height: 8,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginVertical: 10,
+  },
+
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#2563EB',
+    borderRadius: 4,
+  },
+
+  progressSubtext: {
+    fontSize: 12,
+    color: '#64748B',
+    marginBottom: 6,
+  },
+
+  quickMetricsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 12,
+    marginVertical: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+
+  quickMetricCol: {
+    alignItems: 'center',
+    flex: 1,
+  },
+
+  quickMetricLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#94A3B8',
+    letterSpacing: 0.5,
+    marginBottom: 3,
+  },
+
+  quickMetricVal: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+
+  sleepStagePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+
+  sleepStagePillAsleep: {
+    backgroundColor: '#EDE9FE',
+  },
+
+  sleepStagePillAwake: {
+    backgroundColor: '#FEF3C7',
+  },
+
+  sleepStagePillText: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+
+  sleepStagePillTextAsleep: {
+    color: '#6D28D9',
+  },
+
+  sleepStagePillTextAwake: {
+    color: '#B45309',
+  },
+
+  sleepHeroRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginVertical: 10,
+  },
+
+  sleepValueBig: {
+    fontSize: 34,
+    fontWeight: '900',
+    letterSpacing: -1,
+    color: '#0F172A',
+  },
+
+  sleepScoreBadge: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+  },
+
+  sleepScoreBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#15803D',
+  },
+
+  ratePill: {
+    backgroundColor: '#E0E7FF',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+
+  ratePillText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#4338CA',
+  },
+
+  sensorRowHome: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    padding: 12,
+    marginVertical: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+
+  sensorCoordText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+
+  sensorCoordVal: {
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+
+  heroCard: {
+    backgroundColor: '#0F172A',
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 16,
+  },
+
+  heroRowBig: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginTop: 8,
+    marginBottom: 6,
+  },
+
+  heroValueGiant: {
+    fontSize: 48,
+    fontWeight: '900',
+    letterSpacing: -1.5,
+    color: '#F8FAFC',
+  },
+
+  heroUnitGiant: {
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    color: '#94A3B8',
+    marginLeft: 10,
+  },
+
+  walkingStateBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    marginVertical: 12,
+  },
+
+  walkingStateBannerActive: {
+    backgroundColor: '#064E3B',
+  },
+
+  walkingStateBannerIdle: {
+    backgroundColor: '#1E293B',
+  },
+
+  walkingBannerText: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+
+  walkingBannerTextActive: {
+    color: '#34D399',
+  },
+
+  walkingBannerTextIdle: {
+    color: '#94A3B8',
+  },
+
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginTop: 14,
+  },
+
+  statsGridItem: {
+    width: '48%',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+
+  statsGridLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#64748B',
+    letterSpacing: 0.5,
+  },
+
+  statsGridValue: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginTop: 4,
+  },
+
+  statsGridSub: {
+    fontSize: 11,
+    color: '#94A3B8',
+    marginTop: 2,
+  },
+
+  badgePillNeutral: {
+    backgroundColor: '#E2E8F0',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+
+  badgePillTextNeutral: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#475569',
+    letterSpacing: 0.5,
+  },
+
+  metricRowSubTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#64748B',
+    letterSpacing: 0.8,
+    marginTop: 14,
+    marginBottom: 6,
+  },
+
+  intensityBarContainer: {
+    height: 8,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 14,
+  },
+
+  intensityBarFill: {
+    height: '100%',
+    backgroundColor: '#F59E0B',
+    borderRadius: 4,
+  },
+
+  sleepBannerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginVertical: 12,
+  },
+
+  featureItemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderColor: '#F1F5F9',
+  },
+
+  featureBullet: {
+    fontSize: 20,
+    marginRight: 12,
+    marginTop: 2,
+  },
+
+  featureItemTextCol: {
+    flex: 1,
+  },
+
+  featureItemTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+
+  featureItemDesc: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 3,
+    lineHeight: 17,
+  },
+
+  axisMeterRow: {
+    marginTop: 12,
+  },
+
+  axisMeterLabelCol: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+
+  axisMeterName: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#64748B',
+    letterSpacing: 0.5,
+  },
+
+  axisMeterVal: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+
+  axisMeterTrack: {
+    height: 10,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 5,
+    overflow: 'hidden',
+  },
+
+  axisMeterFill: {
+    height: '100%',
+    borderRadius: 5,
+  },
+
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderColor: '#F1F5F9',
+  },
+
+  infoLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+
+  infoVal: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+
+  infoValMono: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#2563EB',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
 });
 
 /*
@@ -3474,6 +4710,123 @@ const darkStyles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#080D16',
+  },
+
+  segmentedTab: {
+    ...lightStyles.segmentedTab,
+    backgroundColor: '#1E293B',
+  },
+
+  activeSegmentedTab: {
+    backgroundColor: '#3B82F6',
+  },
+
+  segmentedTabText: {
+    ...lightStyles.segmentedTabText,
+    color: '#94A3B8',
+  },
+
+  activeSegmentedTabText: {
+    color: '#FFFFFF',
+  },
+
+  walkingPillIdle: {
+    backgroundColor: '#1E293B',
+  },
+
+  walkingPillTextIdle: {
+    color: '#94A3B8',
+  },
+
+  stepsValueBig: {
+    ...lightStyles.stepsValueBig,
+    color: '#F8FAFC',
+  },
+
+  stepsUnitLabel: {
+    ...lightStyles.stepsUnitLabel,
+    color: '#94A3B8',
+  },
+
+  progressBarContainer: {
+    ...lightStyles.progressBarContainer,
+    backgroundColor: '#1E293B',
+  },
+
+  quickMetricsRow: {
+    ...lightStyles.quickMetricsRow,
+    backgroundColor: '#0F172A',
+    borderColor: '#1E293B',
+  },
+
+  quickMetricVal: {
+    ...lightStyles.quickMetricVal,
+    color: '#F8FAFC',
+  },
+
+  sleepValueBig: {
+    ...lightStyles.sleepValueBig,
+    color: '#F8FAFC',
+  },
+
+  sensorRowHome: {
+    ...lightStyles.sensorRowHome,
+    backgroundColor: '#0F172A',
+    borderColor: '#1E293B',
+  },
+
+  sensorCoordVal: {
+    ...lightStyles.sensorCoordVal,
+    color: '#F8FAFC',
+  },
+
+  statsGridItem: {
+    ...lightStyles.statsGridItem,
+    backgroundColor: '#0F172A',
+    borderColor: '#1E293B',
+  },
+
+  statsGridValue: {
+    ...lightStyles.statsGridValue,
+    color: '#F8FAFC',
+  },
+
+  badgePillNeutral: {
+    backgroundColor: '#1E293B',
+  },
+
+  badgePillTextNeutral: {
+    color: '#94A3B8',
+  },
+
+  axisMeterVal: {
+    ...lightStyles.axisMeterVal,
+    color: '#F8FAFC',
+  },
+
+  axisMeterTrack: {
+    ...lightStyles.axisMeterTrack,
+    backgroundColor: '#1E293B',
+  },
+
+  featureItemTitle: {
+    ...lightStyles.featureItemTitle,
+    color: '#F8FAFC',
+  },
+
+  infoVal: {
+    ...lightStyles.infoVal,
+    color: '#F8FAFC',
+  },
+
+  featureItemRow: {
+    ...lightStyles.featureItemRow,
+    borderColor: '#1E293B',
+  },
+
+  infoRow: {
+    ...lightStyles.infoRow,
+    borderColor: '#1E293B',
   },
 
   container: {

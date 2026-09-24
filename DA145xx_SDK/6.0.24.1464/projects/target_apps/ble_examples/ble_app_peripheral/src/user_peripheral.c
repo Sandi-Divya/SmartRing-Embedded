@@ -276,6 +276,9 @@ timer_hnd app_sleep_tracker_timer =
 timer_hnd app_accel_display_timer =
     EASY_TIMER_INVALID_TIMER;
 
+/* Sensor BLE notification state */
+static uint8_t app_sensor_ntf_enabled = 0;
+
 
 /*
  ****************************************************************************************
@@ -733,6 +736,85 @@ void app_hr_send_telemetry_ntf(uint8_t hr)
 
 
 /*
+ * =============================================================================
+ * SENSOR DATA NOTIFICATION
+ *
+ * Sends raw accelerometer sensor readings (X, Y, Z, Packet Sequence)
+ * to mobile app via Service 3 Sensor characteristic (SVC3_IDX_READ_1_VAL).
+ * =============================================================================
+ */
+
+void app_sensor_send_data_ntf(int16_t x, int16_t y, int16_t z)
+{
+    struct custs1_val_ntf_ind_req *ntf_req;
+    static uint16_t packet_seq = 0;
+    static uint8_t db_update_counter = 0;
+    uint8_t payload[8];
+
+    if (app_connection_idx == GAP_INVALID_CONIDX)
+        return;
+
+    if (app_connection_idx >= BLE_CONNECTION_MAX)
+        return;
+
+    if (app_env[app_connection_idx].conidx == GAP_INVALID_CONIDX)
+        return;
+
+    packet_seq++;
+
+    /* Pack 16-bit little-endian X, Y, Z and packet sequence */
+    payload[0] = (uint8_t)(x & 0xFF);
+    payload[1] = (uint8_t)((x >> 8) & 0xFF);
+    payload[2] = (uint8_t)(y & 0xFF);
+    payload[3] = (uint8_t)((y >> 8) & 0xFF);
+    payload[4] = (uint8_t)(z & 0xFF);
+    payload[5] = (uint8_t)((z >> 8) & 0xFF);
+    payload[6] = (uint8_t)(packet_seq & 0xFF);
+    payload[7] = (uint8_t)((packet_seq >> 8) & 0xFF);
+
+    /* Periodically sync value in database for manual GATT reads */
+    if (++db_update_counter >= 10)
+    {
+        db_update_counter = 0;
+        struct custs1_val_set_req *set_req = KE_MSG_ALLOC_DYN(
+            CUSTS1_VAL_SET_REQ,
+            prf_get_task_from_id(TASK_ID_CUSTS1),
+            TASK_APP,
+            custs1_val_set_req,
+            sizeof(payload)
+        );
+        if (set_req != NULL)
+        {
+            set_req->handle = SVC3_IDX_READ_1_VAL;
+            set_req->length = sizeof(payload);
+            memcpy(set_req->value, payload, sizeof(payload));
+            ke_msg_send(set_req);
+        }
+    }
+
+    /* Send notification to central */
+    ntf_req = KE_MSG_ALLOC_DYN(
+        CUSTS1_VAL_NTF_REQ,
+        prf_get_task_from_id(TASK_ID_CUSTS1),
+        TASK_APP,
+        custs1_val_ntf_ind_req,
+        sizeof(payload)
+    );
+
+    if (ntf_req == NULL)
+        return;
+
+    ntf_req->conidx = app_connection_idx;
+    ntf_req->notification = true;
+    ntf_req->handle = SVC3_IDX_READ_1_VAL;
+    ntf_req->length = sizeof(payload);
+    memcpy(ntf_req->value, payload, sizeof(payload));
+
+    ke_msg_send(ntf_req);
+}
+
+
+/*
  ****************************************************************************************
  * HEART RATE POLLING
  ****************************************************************************************
@@ -968,12 +1050,22 @@ void app_clock_set_time(
 
 static void app_sleep_tracker_timer_cb(void)
 {
+    int16_t x;
+    int16_t y;
+    int16_t z;
+
     /*
-     * Read the ADXL362 and update the
-     * step / sleep tracker.
+     * Read the ADXL362 and update the tracker.
      */
     sleep_tracker_update();
 
+    /*
+     * Retrieve the latest X, Y, Z sensor values and stream them
+     * over BLE to the mobile app for complex analysis (steps, walking,
+     * moves, sleep time).
+     */
+    sleep_tracker_get_latest_xyz(&x, &y, &z);
+    app_sensor_send_data_ntf(x, y, z);
 
     /*
      * Continue sampling every 100 ms.
@@ -2058,11 +2150,15 @@ void user_app_connection(
 
 
     /*
-     * The sleep tracker was already started
-     * during initialization.
-     *
-     * Do not start another tracker timer here.
+     * Enable sensor streaming notifications upon connection.
      */
+    app_sensor_ntf_enabled = 1;
+    custs1_set_ccc_value(connection_idx, SVC3_IDX_READ_1_NTF_CFG, PRF_CLI_START_NTF);
+
+    /*
+     * Ensure sleep / activity tracker is running and streaming over BLE.
+     */
+    start_sleep_tracker();
 
 
     if (app_param_update_request_timer !=
@@ -2099,6 +2195,8 @@ void user_app_disconnect(
     stop_hr_polling();
 
     stop_accel_display();
+
+    app_sensor_ntf_enabled = 0;
 
 
     last_sent_batt_lvl =
@@ -2271,6 +2369,11 @@ void user_catch_rest_hndl(
 									
 									  latency_test = (latency_touch_timestamp - GET_TIMESTAMP()) / 16;
                 }
+            }
+            else if ((msg_param->handle == SVC3_IDX_READ_1_NTF_CFG) &&
+                     (msg_param->length >= 1))
+            {
+                app_sensor_ntf_enabled = (msg_param->value[0] != 0);
             }
         }
         break;

@@ -159,6 +159,16 @@ void user_app_get_dev_slv_pref_params(struct gap_slv_pref *slv_params);
 */
 void accel_sample_and_display_state(void);
 
+/**
+ ****************************************************************************************
+ * @brief Sends raw accelerometer sensor data (X, Y, Z) over BLE to mobile app.
+ * @param[in] x X-axis acceleration
+ * @param[in] y Y-axis acceleration
+ * @param[in] z Z-axis acceleration
+ ****************************************************************************************
+*/
+void app_sensor_send_data_ntf(int16_t x, int16_t y, int16_t z);
+
 /// @} APP
 
 #endif // _USER_PERIPHERAL_H_
