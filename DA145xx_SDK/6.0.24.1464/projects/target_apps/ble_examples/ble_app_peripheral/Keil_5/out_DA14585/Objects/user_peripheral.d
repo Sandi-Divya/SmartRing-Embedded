@@ -102,4 +102,7 @@
   ..\src\user_peripheral.h ..\..\..\..\..\sdk\platform\driver\adc\adc.h \
   ..\..\..\..\..\sdk\platform\driver\adc\adc_58x.h \
   ..\src\config\display.h \
-  ..\..\..\..\..\sdk\platform\driver\wkupct_quadec\wkupct_quadec.h
+  ..\..\..\..\..\sdk\platform\driver\wkupct_quadec\wkupct_quadec.h \
+  ..\src\config\sleep_tracker.h ..\src\config\adxl362.h \
+  ..\..\..\..\..\sdk\platform\core_modules\ke\src\ke_env.h \
+  ..\..\..\..\..\sdk\platform\core_modules\ke\api\ke_event.h

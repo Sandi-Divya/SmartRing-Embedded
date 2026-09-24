@@ -34,6 +34,10 @@
 #include "arch.h"           // Platform architecture definition
 #include "arch_api.h"
 
+volatile uint32_t test_finecnt = 0;
+volatile uint32_t test_sleep_before = 0;
+volatile uint32_t test_sleep_after = 0;
+volatile uint8_t  test_sleep_adjusted = 0;
 
 #if (BLE_EMB_PRESENT)
     #include "rwble.h"          // rwble definitions
@@ -491,25 +495,48 @@ sleep_mode_t rwip_sleep(void)
         }
 
 #if defined (__DA14531__)
-        syscntl_cfg_xtal32m_amp_reg(XTAL32M_AMP_REG_TRACKING);      // switch to TRACKING mode when going to sleep
+        syscntl_cfg_xtal32m_amp_reg(XTAL32M_AMP_REG_TRACKING);
 #endif
 
         if (USE_POWER_OPTIMIZATIONS)
         {
             if ( arch_clk_is_RCX20() )
             {
-                // The XTAL16M adaptive settling cannot be used with RCX
                 ASSERT_WARNING(!USE_XTAL16M_ADAPTIVE_SETTLING)
 
                 if (sleep_duration)
                 {
                     uint32_t finecnt = ble_finetimecnt_get();
 
-                    // If we are close before the half of this slot then the actual sleep entry will
-                    // occur during the next one. But the sleep_duration will have been calculated
-                    // based on the current slot...
-                    if (finecnt <= (530) && finecnt >= (624/2))
+                    /*
+                     * ============================================================
+                     * EXPERIMENT A
+                     * Verify BLE fine-time sleep correction.
+                     *
+                     * BLE slot:
+                     *      0 ... 624
+                     *
+                     * Correction window:
+                     *      312 ... 530
+                     *
+                     * When finecnt is inside this window:
+                     *
+                     *      sleep_duration -> sleep_duration - 1
+                     * ============================================================
+                     */
+
+                    test_finecnt = finecnt;
+                    test_sleep_before = sleep_duration;
+                    test_sleep_adjusted = 0;
+
+                    if (finecnt <= 530 && finecnt >= (624 / 2))
+                    {
                         sleep_duration--;
+
+                        test_sleep_adjusted = 1;
+                    }
+
+                    test_sleep_after = sleep_duration;
                 }
             }
         }

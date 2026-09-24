@@ -1,4 +1,4 @@
-./out_da14585/objects/display.o: ..\src\platform\display.c \
+./out_da14585/objects/sleep_tracker.o: ..\src\platform\sleep_tracker.c \
   ..\src\config\da1458x_config_basic.h \
   ..\src\config\da14585_config_basic.h \
   ..\..\..\..\..\sdk\common_project_files\da1458x_stack_config.h \
@@ -71,4 +71,4 @@
   ..\..\..\..\..\sdk\ble_stack\profiles\prf_types.h \
   ..\..\..\..\..\sdk\ble_stack\profiles\prf.h \
   ..\..\..\..\..\sdk\app_modules\api\app_adv_data.h \
-  ..\src\config\display.h ..\src\config\sleep_tracker.h
+  ..\src\config\sleep_tracker.h ..\src\config\adxl362.h

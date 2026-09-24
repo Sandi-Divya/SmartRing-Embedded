@@ -1502,6 +1502,16 @@
               <FileType>5</FileType>
               <FilePath>..\src\config\display.h</FilePath>
             </File>
+            <File>
+              <FileName>sleep_tracker.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\src\config\sleep_tracker.h</FilePath>
+            </File>
+            <File>
+              <FileName>adxl362.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\src\config\adxl362.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -1536,6 +1546,16 @@
               <FileName>display.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\platform\display.c</FilePath>
+            </File>
+            <File>
+              <FileName>sleep_tracker.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\platform\sleep_tracker.c</FilePath>
+            </File>
+            <File>
+              <FileName>adxl362.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\platform\adxl362.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -3052,6 +3072,16 @@
               <FileType>5</FileType>
               <FilePath>..\src\config\display.h</FilePath>
             </File>
+            <File>
+              <FileName>sleep_tracker.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\src\config\sleep_tracker.h</FilePath>
+            </File>
+            <File>
+              <FileName>adxl362.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\src\config\adxl362.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -3086,6 +3116,16 @@
               <FileName>display.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\platform\display.c</FilePath>
+            </File>
+            <File>
+              <FileName>sleep_tracker.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\platform\sleep_tracker.c</FilePath>
+            </File>
+            <File>
+              <FileName>adxl362.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\platform\adxl362.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -4551,6 +4591,16 @@
               <FileType>5</FileType>
               <FilePath>..\src\config\display.h</FilePath>
             </File>
+            <File>
+              <FileName>sleep_tracker.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\src\config\sleep_tracker.h</FilePath>
+            </File>
+            <File>
+              <FileName>adxl362.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\src\config\adxl362.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -4585,6 +4635,16 @@
               <FileName>display.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\platform\display.c</FilePath>
+            </File>
+            <File>
+              <FileName>sleep_tracker.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\platform\sleep_tracker.c</FilePath>
+            </File>
+            <File>
+              <FileName>adxl362.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\platform\adxl362.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -6050,6 +6110,16 @@
               <FileType>5</FileType>
               <FilePath>..\src\config\display.h</FilePath>
             </File>
+            <File>
+              <FileName>sleep_tracker.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\src\config\sleep_tracker.h</FilePath>
+            </File>
+            <File>
+              <FileName>adxl362.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\src\config\adxl362.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -6084,6 +6154,16 @@
               <FileName>display.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\platform\display.c</FilePath>
+            </File>
+            <File>
+              <FileName>sleep_tracker.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\platform\sleep_tracker.c</FilePath>
+            </File>
+            <File>
+              <FileName>adxl362.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\platform\adxl362.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -7549,6 +7629,16 @@
               <FileType>5</FileType>
               <FilePath>..\src\config\display.h</FilePath>
             </File>
+            <File>
+              <FileName>sleep_tracker.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\src\config\sleep_tracker.h</FilePath>
+            </File>
+            <File>
+              <FileName>adxl362.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\src\config\adxl362.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -7583,6 +7673,16 @@
               <FileName>display.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\platform\display.c</FilePath>
+            </File>
+            <File>
+              <FileName>sleep_tracker.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\platform\sleep_tracker.c</FilePath>
+            </File>
+            <File>
+              <FileName>adxl362.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\platform\adxl362.c</FilePath>
             </File>
           </Files>
         </Group>

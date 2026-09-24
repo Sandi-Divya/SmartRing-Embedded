@@ -299,18 +299,18 @@ static const struct gapm_configuration user_gapm_conf = {
 static const struct connection_param_configuration user_connection_param_conf = {
     /// Connection interval minimum measured in ble double slots (1.25ms)
     /// use the macro MS_TO_DOUBLESLOTS to convert from milliseconds (ms) to double slots
-    .intv_min = MS_TO_DOUBLESLOTS(10),
+    .intv_min = MS_TO_DOUBLESLOTS(7.5),
 
     /// Connection interval maximum measured in ble double slots (1.25ms)
     /// use the macro MS_TO_DOUBLESLOTS to convert from milliseconds (ms) to double slots
-    .intv_max = MS_TO_DOUBLESLOTS(20),
+    .intv_max = MS_TO_DOUBLESLOTS(15),
 
     /// Latency measured in connection events
     .latency = 0,
 
     /// Supervision timeout measured in timer units (10 ms)
     /// use the macro MS_TO_TIMERUNITS to convert from milliseconds (ms) to timer units
-    .time_out = MS_TO_TIMERUNITS(1250),
+    .time_out = MS_TO_TIMERUNITS(2000),
 
     /// Minimum Connection Event Duration measured in ble double slots (1.25ms)
     /// use the macro MS_TO_DOUBLESLOTS to convert from milliseconds (ms) to double slots

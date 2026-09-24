@@ -1,3 +1,4 @@
+
 /**
  ****************************************************************************************
  *
@@ -10,6 +11,8 @@
  *      - Heart-rate telemetry
  *      - Manual software clock
  *      - Sequential OLED control
+ *      - ADXL362 accelerometer test
+ *      - Sleep / activity tracking
  *
  * OLED SEQUENCE:
  *
@@ -32,6 +35,11 @@
  *        |
  *        v
  *      HEART RATE
+ *
+ *      SHORT TAP
+ *        |
+ *        v
+ *      ACCELEROMETER
  *
  *      SHORT TAP
  *        |
@@ -74,7 +82,30 @@
 #include "display.h"
 #include "wkupct_quadec.h"
 
-extern void app_clock_set_time(uint8_t hour, uint8_t minute);
+#include "sleep_tracker.h"
+#include "adxl362.h"
+
+#include "ke_env.h"
+
+#define GET_TIMESTAMP()   (SysTick->VAL)
+
+
+/*
+ * ================================================================
+ * LATENCY TEST GLOBALS
+ * ================================================================
+ *
+ * Kept for future latency measurement implementation.
+ *
+ * IMPORTANT:
+ * lld_evt_time_get() was removed because it is not exposed/
+ * linked in this DA14585 SDK build.
+ *
+ * ================================================================
+ */
+
+volatile uint32_t latency_touch_timestamp = 0;
+volatile uint32_t latency_test = 0;
 
 
 /*
@@ -83,45 +114,14 @@ extern void app_clock_set_time(uint8_t hour, uint8_t minute);
  ****************************************************************************************
  */
 
-/*
- * app_easy_timer() uses 10 ms units.
- *
- * 100 x 10 ms = 1000 ms = 1 second.
- */
-#define LONG_PRESS_TIME               100
-
-/*
- * Check button state every 10 ms.
- */
+#define LONG_PRESS_TIME             100
 #define TOUCH_RELEASE_CHECK_TIME      1
-
-/*
- * Wait 100 ms after release before enabling
- * the wake-up interrupt again.
- */
-#define TOUCH_REARM_DELAY             10
+#define TOUCH_REARM_DELAY            10
 
 
 /*
  ****************************************************************************************
  * TELEMETRY TIMING
- ****************************************************************************************
- *
- * app_easy_timer() unit = 10 ms.
- *
- * Battery:
- *
- *      18000 x 10 ms
- *      = 180000 ms
- *      = 180 seconds
- *      = 3 minutes
- *
- * Heart rate:
- *
- *      1500 x 10 ms
- *      = 15000 ms
- *      = 15 seconds
- *
  ****************************************************************************************
  */
 
@@ -133,22 +133,41 @@ extern void app_clock_set_time(uint8_t hour, uint8_t minute);
  ****************************************************************************************
  * BATTERY FIRST-READ DELAY
  ****************************************************************************************
+ */
+
+#define BATTERY_FIRST_READ_DELAY      500
+
+
+/*
+ ****************************************************************************************
+ * SLEEP TRACKER TIMING
+ ****************************************************************************************
  *
- * After BLE connection, wait 1 second before sending
- * the first battery notification.
+ * app_easy_timer() uses 10 ms timer units.
  *
- * This gives the mobile application time to:
- *
- *      1. Discover services
- *      2. Discover characteristics
- *      3. Enable notifications
- *
- * 100 x 10 ms = 1 second
+ * 10 = 100 ms
  *
  ****************************************************************************************
  */
 
-#define BATTERY_FIRST_READ_DELAY      500
+#define SLEEP_TRACKER_POLL_TIME       10
+
+
+/*
+ ****************************************************************************************
+ * ACCELEROMETER DISPLAY TIMING
+ ****************************************************************************************
+ *
+ * 10 = 100 ms
+ *
+ * The accelerometer OLED screen is refreshed
+ * continuously while DISPLAY_SEQUENCE_ACCEL
+ * is active.
+ *
+ ****************************************************************************************
+ */
+
+#define ACCEL_DISPLAY_POLL_TIME       10
 
 
 /*
@@ -159,13 +178,11 @@ extern void app_clock_set_time(uint8_t hour, uint8_t minute);
 
 #define DISPLAY_SEQUENCE_TIME         0
 #define DISPLAY_SEQUENCE_BATTERY      1
-#define DISPLAY_SEQUENCE_HR            2
-
+#define DISPLAY_SEQUENCE_HR           2
+#define DISPLAY_SEQUENCE_ACCEL        3
 
 /*
- * Current display position:
- *
- * TIME -> BATTERY -> HR -> OFF
+ * TIME -> BATTERY -> HR -> ACCEL -> OFF
  */
 uint8_t display_sequence =
     DISPLAY_SEQUENCE_TIME;
@@ -194,18 +211,6 @@ uint8_t current_batt_lvl =
 timer_hnd app_batt_poll_timer =
     EASY_TIMER_INVALID_TIMER;
 
-
-/*
- * Last battery percentage actually sent
- * through BLE notification.
- *
- * 255 means:
- *
- *      No value has been sent yet.
- *
- * This ensures the first battery value after
- * connection is always sent.
- */
 static uint8_t last_sent_batt_lvl =
     255;
 
@@ -237,16 +242,6 @@ static timer_hnd app_param_update_request_timer =
  ****************************************************************************************
  * SOFTWARE CLOCK
  ****************************************************************************************
- *
- * clock_time_valid:
- *
- *      0 = Time has never been received from phone
- *          OLED should show --:--
- *
- *      1 = Valid time received from phone
- *          OLED can show the current time
- *
- ****************************************************************************************
  */
 
 uint8_t manual_clock_hour =
@@ -264,53 +259,45 @@ timer_hnd app_clock_timer =
 
 /*
  ****************************************************************************************
+ * SLEEP / ACTIVITY TRACKER
+ ****************************************************************************************
+ */
+
+timer_hnd app_sleep_tracker_timer =
+    EASY_TIMER_INVALID_TIMER;
+
+
+/*
+ ****************************************************************************************
+ * ACCELEROMETER DISPLAY
+ ****************************************************************************************
+ */
+
+timer_hnd app_accel_display_timer =
+    EASY_TIMER_INVALID_TIMER;
+
+
+/*
+ ****************************************************************************************
  * TOUCH STATE
  ****************************************************************************************
  */
 
-/*
- * 1 = a press is currently being processed.
- * 0 = no active press.
- */
 uint8_t touch_press_active =
     0;
 
-
-/*
- * 1 = current press became a long press.
- * 0 = current press was a short press.
- */
 uint8_t long_press_detected =
     0;
 
-
-/*
- * 1 = long press was confirmed.
- *
- * While this is active, the release can NEVER
- * become a short tap.
- */
 uint8_t touch_long_press_lock =
     0;
 
-
-/*
- * Long press timer.
- */
 timer_hnd app_long_press_timer =
     EASY_TIMER_INVALID_TIMER;
 
-
-/*
- * Release monitoring timer.
- */
 timer_hnd app_touch_release_timer =
     EASY_TIMER_INVALID_TIMER;
 
-
-/*
- * Delayed wake-up re-arm timer.
- */
 timer_hnd app_touch_rearm_timer =
     EASY_TIMER_INVALID_TIMER;
 
@@ -318,13 +305,6 @@ timer_hnd app_touch_rearm_timer =
 /*
  ****************************************************************************************
  * DISPLAY STATE
- ****************************************************************************************
- *
- *      0 = OLED OFF
- *      1 = OLED ON
- *
- * OLED starts OFF.
- *
  ****************************************************************************************
  */
 
@@ -360,12 +340,29 @@ static void start_clock(void);
 static void stop_clock(void);
 
 
+/* Sleep / activity tracker */
+static void app_sleep_tracker_timer_cb(void);
+static void start_sleep_tracker(void);
+static void stop_sleep_tracker(void);
+
+
+/* Accelerometer display */
+static void app_accel_display_timer_cb(void);
+static void start_accel_display(void);
+static void stop_accel_display(void);
+
+
 /* Touch */
 static void touch_button_press_cb(void);
 static void touch_button_init(void);
 static void long_press_timer_cb(void);
 static void touch_release_timer_cb(void);
 static void touch_rearm_timer_cb(void);
+
+
+/* Accelerometer */
+static void accelerometer_test(void);
+static void accelerometer_verify_device(void);
 
 
 /*
@@ -474,10 +471,8 @@ void app_batt_send_telemetry_ntf(uint8_t batt_lvl)
      ****************************************************************************************
      * BATTERY DUPLICATE PROTECTION
      ****************************************************************************************
-     *
-     * If the battery percentage has not changed,
-     * don't send another BLE notification.
      */
+
     if (batt_lvl == last_sent_batt_lvl)
     {
         return;
@@ -520,13 +515,19 @@ void app_batt_send_telemetry_ntf(uint8_t batt_lvl)
         batt_lvl;
 
 
+    /*
+     * NOTE:
+     * lld_evt_time_get() was removed because the symbol is not
+     * available in this DA14585 SDK build.
+     *
+     * latency_test remains available for a future supported
+     * timestamp implementation.
+     */
+
+
     ke_msg_send(ntf_req);
 
 
-    /*
-     * Remember the battery value that was
-     * actually sent.
-     */
     last_sent_batt_lvl =
         batt_lvl;
 }
@@ -543,9 +544,6 @@ static void app_batt_poll_timer_cb(void)
     uint8_t batt;
 
 
-    /*
-     * Stop if disconnected.
-     */
     if (app_connection_idx ==
         GAP_INVALID_CONIDX)
     {
@@ -555,12 +553,6 @@ static void app_batt_poll_timer_cb(void)
         return;
     }
 
-
-    /*
-     ****************************************************************************************
-     * READ BATTERY ADC
-     ****************************************************************************************
-     */
 
     batt =
         read_battery_level_percentage();
@@ -574,34 +566,10 @@ static void app_batt_poll_timer_cb(void)
         batt;
 
 
-    /*
-     ****************************************************************************************
-     * SEND BATTERY
-     ****************************************************************************************
-     *
-     * The first connection starts with:
-     *
-     *      last_sent_batt_lvl = 255
-     *
-     * Therefore the first battery value is
-     * ALWAYS sent.
-     *
-     * After that, notification is only sent
-     * when the battery percentage changes.
-     */
-
     app_batt_send_telemetry_ntf(
         batt
     );
 
-
-    /*
-     ****************************************************************************************
-     * NEXT BATTERY CHECK
-     ****************************************************************************************
-     *
-     * 18000 x 10 ms = 3 minutes.
-     */
 
     if (app_connection_idx !=
         GAP_INVALID_CONIDX)
@@ -623,46 +591,17 @@ static void app_batt_poll_timer_cb(void)
 
 static void start_battery_polling(void)
 {
-    /*
-     * Cancel any old battery timer.
-     */
     stop_battery_polling();
 
 
-    /*
-     * No connection = nothing to do.
-     */
     if (app_connection_idx ==
         GAP_INVALID_CONIDX)
         return;
 
 
-    /*
-     ****************************************************************************************
-     * FORCE FIRST BATTERY NOTIFICATION
-     ****************************************************************************************
-     *
-     * 255 means no battery value has been
-     * sent for this connection.
-     */
-
     last_sent_batt_lvl =
         255;
 
-
-    /*
-     ****************************************************************************************
-     * FIRST BATTERY READ
-     ****************************************************************************************
-     *
-     * Wait 1 second after connection.
-     *
-     * 100 x 10 ms = 1 second.
-     *
-     * This is important because the phone needs
-     * time to discover the characteristic and
-     * enable notifications.
-     */
 
     app_batt_poll_timer =
         app_easy_timer(
@@ -801,12 +740,6 @@ void app_hr_send_telemetry_ntf(uint8_t hr)
 
 static void app_hr_poll_timer_cb(void)
 {
-    /*
-     ****************************************************************************************
-     * STOP IF DISCONNECTED
-     ****************************************************************************************
-     */
-
     if (app_connection_idx ==
         GAP_INVALID_CONIDX)
     {
@@ -817,41 +750,14 @@ static void app_hr_poll_timer_cb(void)
     }
 
 
-    /*
-     ****************************************************************************************
-     * TEMPORARY TEST VALUE
-     ****************************************************************************************
-     *
-     * Keep 75 for now.
-     *
-     * Later replace ONLY this value with
-     * the actual HR sensor reading.
-     *
-     * Do not change the 15-second timer.
-     */
-
     current_hr_value =
         155;
 
-
-    /*
-     ****************************************************************************************
-     * SEND HR
-     ****************************************************************************************
-     */
 
     app_hr_send_telemetry_ntf(
         current_hr_value
     );
 
-
-    /*
-     ****************************************************************************************
-     * NEXT HR UPDATE
-     ****************************************************************************************
-     *
-     * 1500 x 10 ms = 15 seconds.
-     */
 
     if (app_connection_idx !=
         GAP_INVALID_CONIDX)
@@ -873,35 +779,13 @@ static void app_hr_poll_timer_cb(void)
 
 static void start_hr_polling(void)
 {
-    /*
-     * Cancel any previous HR timer.
-     */
     stop_hr_polling();
 
 
-    /*
-     * No connection = nothing to do.
-     */
     if (app_connection_idx ==
         GAP_INVALID_CONIDX)
         return;
 
-
-    /*
-     ****************************************************************************************
-     * FIRST HR READING
-     ****************************************************************************************
-     *
-     * Do NOT send HR immediately.
-     *
-     * The HR sensor needs time to settle.
-     *
-     * First HR sensor update:
-     *
-     *      +15 seconds
-     *
-     * Then every 15 seconds.
-     */
 
     app_hr_poll_timer =
         app_easy_timer(
@@ -936,28 +820,10 @@ static void stop_hr_polling(void)
  ****************************************************************************************
  * CLOCK
  ****************************************************************************************
- *
- * Phone sends the current time only when BLE
- * connects.
- *
- * After receiving the time:
- *
- *      phone  -> HH:MM
- *      ring   -> stores HH:MM
- *      timer  -> advances one minute
- *
- * The clock timer is NOT stopped when BLE
- * disconnects.
- *
- ****************************************************************************************
  */
 
 static void app_clock_timer_cb(void)
 {
-    /*
-     * Do nothing until the phone has supplied
-     * the first valid time.
-     */
     if (clock_time_valid == 0)
     {
         app_clock_timer =
@@ -967,9 +833,6 @@ static void app_clock_timer_cb(void)
     }
 
 
-    /*
-     * Advance one minute.
-     */
     manual_clock_minute++;
 
 
@@ -987,17 +850,6 @@ static void app_clock_timer_cb(void)
     }
 
 
-    /*
-     ****************************************************************************************
-     * UPDATE OLED
-     ****************************************************************************************
-     *
-     * Only update OLED when TIME is currently
-     * being displayed.
-     *
-     * Battery and HR screens are not interrupted.
-     */
-
     if ((display_is_on != 0) &&
         (display_sequence == DISPLAY_SEQUENCE_TIME))
     {
@@ -1007,24 +859,6 @@ static void app_clock_timer_cb(void)
         );
     }
 
-
-    /*
-     ****************************************************************************************
-     * NEXT CLOCK UPDATE
-     ****************************************************************************************
-     *
-     * IMPORTANT:
-     *
-     * app_easy_timer() uses 10 ms units.
-     *
-     * 6000 x 10 ms
-     * = 60000 ms
-     * = 60 seconds
-     * = 1 minute.
-     *
-     * Therefore the ring advances exactly one
-     * minute per timer callback.
-     */
 
     app_clock_timer =
         app_easy_timer(
@@ -1066,13 +900,6 @@ static void start_clock(void)
     stop_clock();
 
 
-    /*
-     * Do NOT create a fake starting time.
-     *
-     * Until the phone sends the first time,
-     * clock_time_valid remains 0.
-     */
-
     manual_clock_hour =
         0;
 
@@ -1081,14 +908,6 @@ static void start_clock(void)
 
     clock_time_valid =
         0;
-
-
-    /*
-     * Do not start the minute counter yet.
-     *
-     * It will start when the phone sends
-     * the first valid time.
-     */
 }
 
 
@@ -1096,64 +915,30 @@ static void start_clock(void)
  ****************************************************************************************
  * SET CLOCK FROM PHONE
  ****************************************************************************************
- *
- * hour   = 0 - 23
- * minute = 0 - 59
- *
- * This is called when the mobile application
- * writes the current phone time to the Clock
- * characteristic.
- *
- * This happens once after BLE connection.
- *
- * The stored time then continues running even
- * after BLE disconnects.
- ****************************************************************************************
  */
 
 void app_clock_set_time(
                     uint8_t hour,
                     uint8_t minute)
 {
-    /*
-     * Validate hour.
-     */
     if (hour >= 24)
         return;
 
 
-    /*
-     * Validate minute.
-     */
     if (minute >= 60)
         return;
 
 
-    /*
-     * Store phone time.
-     */
     manual_clock_hour =
         hour;
 
     manual_clock_minute =
         minute;
 
-
-    /*
-     * Time is now valid.
-     */
     clock_time_valid =
         1;
 
 
-    /*
-     * Restart the one-minute clock timer.
-     *
-     * This is important when reconnecting:
-     *
-     *      old ring time -> replaced by phone time
-     *      timer          -> starts counting again
-     */
     stop_clock();
 
 
@@ -1164,10 +949,6 @@ void app_clock_set_time(
         );
 
 
-    /*
-     * Immediately refresh OLED if the TIME
-     * screen is currently visible.
-     */
     if ((display_is_on != 0) &&
         (display_sequence == DISPLAY_SEQUENCE_TIME))
     {
@@ -1175,6 +956,151 @@ void app_clock_set_time(
             manual_clock_hour,
             manual_clock_minute
         );
+    }
+}
+
+
+/*
+ ****************************************************************************************
+ * SLEEP / ACTIVITY TRACKER
+ ****************************************************************************************
+ */
+
+static void app_sleep_tracker_timer_cb(void)
+{
+    /*
+     * Read the ADXL362 and update the
+     * step / sleep tracker.
+     */
+    sleep_tracker_update();
+
+
+    /*
+     * Continue sampling every 100 ms.
+     */
+    app_sleep_tracker_timer =
+        app_easy_timer(
+            SLEEP_TRACKER_POLL_TIME,
+            app_sleep_tracker_timer_cb
+        );
+}
+
+
+/*
+ ****************************************************************************************
+ * START SLEEP TRACKER
+ ****************************************************************************************
+ */
+
+static void start_sleep_tracker(void)
+{
+    stop_sleep_tracker();
+
+
+    app_sleep_tracker_timer =
+        app_easy_timer(
+            SLEEP_TRACKER_POLL_TIME,
+            app_sleep_tracker_timer_cb
+        );
+}
+
+
+/*
+ ****************************************************************************************
+ * STOP SLEEP TRACKER
+ ****************************************************************************************
+ */
+
+static void stop_sleep_tracker(void)
+{
+    if (app_sleep_tracker_timer !=
+        EASY_TIMER_INVALID_TIMER)
+    {
+        app_easy_timer_cancel(
+            app_sleep_tracker_timer
+        );
+
+        app_sleep_tracker_timer =
+            EASY_TIMER_INVALID_TIMER;
+    }
+}
+
+
+/*
+ ****************************************************************************************
+ * ACCELEROMETER DISPLAY REFRESH
+ ****************************************************************************************
+ */
+
+static void app_accel_display_timer_cb(void)
+{
+    /*
+     * Only refresh the OLED while the
+     * accelerometer screen is active.
+     */
+    if ((display_is_on != 0) &&
+        (display_sequence == DISPLAY_SEQUENCE_ACCEL))
+    {
+        accelerometer_test();
+
+
+        app_accel_display_timer =
+            app_easy_timer(
+                ACCEL_DISPLAY_POLL_TIME,
+                app_accel_display_timer_cb
+            );
+    }
+    else
+    {
+        app_accel_display_timer =
+            EASY_TIMER_INVALID_TIMER;
+    }
+}
+
+
+/*
+ ****************************************************************************************
+ * START ACCELEROMETER DISPLAY
+ ****************************************************************************************
+ */
+
+static void start_accel_display(void)
+{
+    stop_accel_display();
+
+
+    if ((display_is_on == 0) ||
+        (display_sequence != DISPLAY_SEQUENCE_ACCEL))
+    {
+        return;
+    }
+
+
+    app_accel_display_timer =
+        app_easy_timer(
+            ACCEL_DISPLAY_POLL_TIME,
+            app_accel_display_timer_cb
+        );
+}
+
+
+/*
+ ****************************************************************************************
+ * STOP ACCELEROMETER DISPLAY
+ ****************************************************************************************
+ */
+
+static void stop_accel_display(void)
+{
+    if (app_accel_display_timer !=
+        EASY_TIMER_INVALID_TIMER)
+    {
+        app_easy_timer_cancel(
+            app_accel_display_timer
+        );
+
+        app_accel_display_timer =
+            EASY_TIMER_INVALID_TIMER;
     }
 }
 
@@ -1191,10 +1117,6 @@ static void long_press_timer_cb(void)
         EASY_TIMER_INVALID_TIMER;
 
 
-    /*
-     * If the pin is no longer LOW,
-     * the user released before 1 second.
-     */
     if (GPIO_GetPinStatus(
             GPIO_PORT_1,
             GPIO_PIN_3) != 0)
@@ -1203,31 +1125,17 @@ static void long_press_timer_cb(void)
     }
 
 
-    /*
-     ****************************************************************************************
-     * LONG PRESS CONFIRMED
-     ****************************************************************************************
-     */
-
     long_press_detected =
         1;
-
 
     touch_long_press_lock =
         1;
 
 
-    /*
-     ****************************************************************************************
-     * OLED OFF -> OLED ON + TIME
-     ****************************************************************************************
-     */
-
     if (display_is_on == 0)
     {
         display_is_on =
             1;
-
 
         display_sequence =
             DISPLAY_SEQUENCE_TIME;
@@ -1248,11 +1156,6 @@ static void long_press_timer_cb(void)
             );
         }
     }
-
-
-    /*
-     * If OLED is already ON, do nothing.
-     */
 }
 
 
@@ -1264,11 +1167,6 @@ static void long_press_timer_cb(void)
 
 static void touch_release_timer_cb(void)
 {
-    /*
-     * Button is still LOW.
-     *
-     * Keep waiting.
-     */
     if (GPIO_GetPinStatus(
             GPIO_PORT_1,
             GPIO_PIN_3) == 0)
@@ -1283,12 +1181,6 @@ static void touch_release_timer_cb(void)
     }
 
 
-    /*
-     ****************************************************************************************
-     * BUTTON RELEASED
-     ****************************************************************************************
-     */
-
     app_touch_release_timer =
         EASY_TIMER_INVALID_TIMER;
 
@@ -1297,9 +1189,6 @@ static void touch_release_timer_cb(void)
         0;
 
 
-    /*
-     * Cancel long press timer.
-     */
     if (app_long_press_timer !=
         EASY_TIMER_INVALID_TIMER)
     {
@@ -1312,25 +1201,15 @@ static void touch_release_timer_cb(void)
     }
 
 
-    /*
-     ****************************************************************************************
-     * LONG PRESS RELEASE
-     ****************************************************************************************
-     */
-
     if (touch_long_press_lock)
     {
         touch_long_press_lock =
             0;
 
-
         long_press_detected =
             0;
 
 
-        /*
-         * Wait before rearming.
-         */
         if (app_touch_rearm_timer !=
             EASY_TIMER_INVALID_TIMER)
         {
@@ -1349,22 +1228,10 @@ static void touch_release_timer_cb(void)
                 touch_rearm_timer_cb
             );
 
-
         return;
     }
 
 
-    /*
-     ****************************************************************************************
-     * SHORT TAP
-     ****************************************************************************************
-     */
-
-    /*
-     * OLED OFF:
-     *
-     * Short tap does nothing.
-     */
     if (display_is_on == 0)
     {
         if (app_touch_rearm_timer !=
@@ -1385,15 +1252,14 @@ static void touch_release_timer_cb(void)
                 touch_rearm_timer_cb
             );
 
-
         return;
     }
 
 
     /*
-     ****************************************************************************************
+     * ================================================================
      * TIME -> BATTERY
-     ****************************************************************************************
+     * ================================================================
      */
 
     if (display_sequence ==
@@ -1412,11 +1278,10 @@ static void touch_release_timer_cb(void)
             current_batt_lvl
         );
 
-
-        /*
-         * Update GATT database and notify only
-         * if the battery value changed.
-         */
+	
+				latency_test = (latency_touch_timestamp - GET_TIMESTAMP()) / 16000;
+        GPIO_SetActive(GPIO_PORT_1, GPIO_PIN_0); // LED blink = measurement done
+				
         app_batt_send_telemetry_ntf(
             current_batt_lvl
         );
@@ -1428,9 +1293,9 @@ static void touch_release_timer_cb(void)
 
 
     /*
-     ****************************************************************************************
+     * ================================================================
      * BATTERY -> HEART RATE
-     ****************************************************************************************
+     * ================================================================
      */
 
     else if (display_sequence ==
@@ -1447,14 +1312,57 @@ static void touch_release_timer_cb(void)
 
 
     /*
-     ****************************************************************************************
-     * HEART RATE -> OLED OFF
-     ****************************************************************************************
+     * ================================================================
+     * HEART RATE -> ACCELEROMETER
+     * ================================================================
      */
 
     else if (display_sequence ==
              DISPLAY_SEQUENCE_HR)
     {
+        /*
+         * DO NOT call sleep_tracker_update()
+         * here.
+         *
+         * The tracker already has its own
+         * 100 ms timer.
+         */
+
+        display_sequence =
+            DISPLAY_SEQUENCE_ACCEL;
+
+
+        /*
+         * Draw the first X/Y/Z values
+         * immediately.
+         */
+        accelerometer_test();
+
+
+        /*
+         * Start continuous OLED refresh.
+         */
+        start_accel_display();
+    }
+
+
+    /*
+     * ================================================================
+     * ACCELEROMETER -> DISPLAY OFF
+     * ================================================================
+     */
+
+    else if (display_sequence ==
+             DISPLAY_SEQUENCE_ACCEL)
+    {
+        /*
+         * Stop continuous accelerometer
+         * OLED refresh before turning
+         * the display off.
+         */
+        stop_accel_display();
+
+
         display_clear();
 
 
@@ -1468,8 +1376,11 @@ static void touch_release_timer_cb(void)
 
 
     /*
-     * Delay wake-up rearming.
+     * ================================================================
+     * REARM TOUCH
+     * ================================================================
      */
+
     if (app_touch_rearm_timer !=
         EASY_TIMER_INVALID_TIMER)
     {
@@ -1502,10 +1413,6 @@ static void touch_rearm_timer_cb(void)
         EASY_TIMER_INVALID_TIMER;
 
 
-    /*
-     * Never enable wake-up while P1_3
-     * is still LOW.
-     */
     if (GPIO_GetPinStatus(
             GPIO_PORT_1,
             GPIO_PIN_3) == 0)
@@ -1520,18 +1427,11 @@ static void touch_rearm_timer_cb(void)
     }
 
 
-    /*
-     * Pin is HIGH.
-     *
-     * Safe to accept another press.
-     */
     touch_press_active =
         0;
 
-
     long_press_detected =
         0;
-
 
     touch_long_press_lock =
         0;
@@ -1568,54 +1468,41 @@ static void touch_rearm_timer_cb(void)
 
 static void touch_button_press_cb(void)
 {
-    /*
-     * Ignore repeated interrupt events.
-     */
+		latency_touch_timestamp = GET_TIMESTAMP();
+	
     if (touch_press_active)
         return;
 
 
-    /*
-     * Ignore while long-press lock is active.
-     */
     if (touch_long_press_lock)
         return;
 
 
     /*
-     * Mark this press active immediately.
+     * Latency timestamp capture temporarily disabled.
+     *
+     * lld_evt_time_get() is not available in this SDK build.
+     *
+     * latency_touch_timestamp remains available for a future
+     * supported timing implementation.
      */
+
+
     touch_press_active =
         1;
-
 
     long_press_detected =
         0;
 
 
-    /*
-     * Diagnostic LED.
-     */
     GPIO_SetActive(
         GPIO_PORT_1,
         GPIO_PIN_0
     );
 
 
-    /*
-     ****************************************************************************************
-     * DISABLE WAKE-UP INTERRUPT
-     ****************************************************************************************
-     */
-
     wkupct_disable_irq();
 
-
-    /*
-     ****************************************************************************************
-     * START LONG PRESS TIMER
-     ****************************************************************************************
-     */
 
     if (app_long_press_timer !=
         EASY_TIMER_INVALID_TIMER)
@@ -1635,12 +1522,6 @@ static void touch_button_press_cb(void)
             long_press_timer_cb
         );
 
-
-    /*
-     ****************************************************************************************
-     * START RELEASE MONITORING
-     ****************************************************************************************
-     */
 
     if (app_touch_release_timer !=
         EASY_TIMER_INVALID_TIMER)
@@ -1673,10 +1554,8 @@ static void touch_button_init(void)
     touch_press_active =
         0;
 
-
     long_press_detected =
         0;
-
 
     touch_long_press_lock =
         0;
@@ -1685,24 +1564,15 @@ static void touch_button_init(void)
     app_long_press_timer =
         EASY_TIMER_INVALID_TIMER;
 
-
     app_touch_release_timer =
         EASY_TIMER_INVALID_TIMER;
-
 
     app_touch_rearm_timer =
         EASY_TIMER_INVALID_TIMER;
 
 
-    /*
-     ****************************************************************************************
-     * OLED STARTS OFF
-     ****************************************************************************************
-     */
-
     display_is_on =
         0;
-
 
     display_sequence =
         DISPLAY_SEQUENCE_TIME;
@@ -1710,12 +1580,6 @@ static void touch_button_init(void)
 
     display_clear();
 
-
-    /*
-     ****************************************************************************************
-     * ENABLE TOUCH
-     ****************************************************************************************
-     */
 
     wkupct_register_callback(
         touch_button_press_cb
@@ -1780,28 +1644,243 @@ static void param_update_request_timer_cb(void)
     cmd->operation =
         GAPC_UPDATE_PARAMS;
 
-
+    /*
+     * Aligned with user_connection_param_conf
+     * (7.5 ms .. 15 ms connection interval, 2 s supervision timeout).
+     *
+     * intv_min/intv_max are in 1.25 ms double slots.
+     * time_out is in 10 ms timer units.
+     */
     cmd->intv_min =
-        10;
-
+        US_TO_DOUBLESLOTS(7500);
 
     cmd->intv_max =
-        20;
-
+        US_TO_DOUBLESLOTS(15000);
 
     cmd->latency =
         0;
 
-
     cmd->time_out =
-        200;
-
+        MS_TO_TIMERUNITS(2000);
 
     ke_msg_send(cmd);
 
 
     app_param_update_request_timer =
         EASY_TIMER_INVALID_TIMER;
+}
+
+
+/*
+ ****************************************************************************************
+ * SLAVE PREFERRED CONNECTION PARAMETERS
+ ****************************************************************************************
+ *
+ * Advertised in the GAP "slave preferred connection parameters"
+ * characteristic so the central is told to connect with a
+ * responsive 7.5 ms .. 15 ms interval.
+ */
+
+void user_app_get_dev_slv_pref_params(struct gap_slv_pref *slv_params)
+{
+    if (slv_params == NULL)
+        return;
+
+
+    slv_params->con_intv_min =
+        US_TO_DOUBLESLOTS(7500);
+
+    slv_params->con_intv_max =
+        US_TO_DOUBLESLOTS(15000);
+
+    slv_params->slave_latency =
+        0;
+
+    slv_params->conn_timeout =
+        MS_TO_TIMERUNITS(2000);
+}
+
+
+/*
+ ****************************************************************************************
+ * INTEGER TO STRING
+ ****************************************************************************************
+ */
+
+static void accel_int_to_string(
+                    int16_t value,
+                    char *buffer)
+{
+    char temp[8];
+
+    uint8_t index =
+        0;
+
+    uint8_t output_index =
+        0;
+
+    uint16_t magnitude;
+
+
+    if (value < 0)
+    {
+        buffer[output_index++] =
+            '-';
+
+        magnitude =
+            (uint16_t)(-(int32_t)value);
+    }
+    else
+    {
+        magnitude =
+            (uint16_t)value;
+    }
+
+
+    if (magnitude == 0)
+    {
+        buffer[output_index++] =
+            '0';
+
+        buffer[output_index] =
+            '\0';
+
+        return;
+    }
+
+
+    while (magnitude > 0)
+    {
+        temp[index++] =
+            (char)('0' + (magnitude % 10));
+
+        magnitude =
+            magnitude / 10;
+    }
+
+
+    while (index > 0)
+    {
+        index--;
+
+        buffer[output_index++] =
+            temp[index];
+    }
+
+
+    buffer[output_index] =
+        '\0';
+}
+
+
+/*
+ ****************************************************************************************
+ * ACCELEROMETER TEST
+ ****************************************************************************************
+ * =============================================================================
+ * ACCELEROMETER 10-SAMPLE ANALYSIS & DISPLAY
+ * =============================================================================
+ *
+ * Gathers 10 samples from the ADXL362 accelerometer, analyzes whether the motion
+ * is:
+ *      - SLEEP
+ *      - JUST MOVE
+ *      - WALK
+ * and then prints the classification, step count, and accelerometer readings into
+ * the OLED display.
+ * =============================================================================
+ */
+
+void accel_sample_and_display_state(void)
+{
+    int16_t x_samples[ACCEL_WINDOW_SIZE];
+    int16_t y_samples[ACCEL_WINDOW_SIZE];
+    int16_t z_samples[ACCEL_WINDOW_SIZE];
+    uint8_t i;
+
+    /*
+     * Gather 10 samples from ADXL362
+     */
+    for (i = 0; i < ACCEL_WINDOW_SIZE; i++)
+    {
+        adxl362_read_xyz(
+            &x_samples[i],
+            &y_samples[i],
+            &z_samples[i]
+        );
+
+        SetWord16(WATCHDOG_REG, 0xFF);
+
+        /*
+         * Short delay ~10 ms between samples
+         */
+        for (volatile uint32_t d = 0; d < 16000; d++)
+        {
+            __NOP();
+        }
+    }
+
+    /*
+     * 10-sample analysis: SLEEP, JUST MOVE, or WALK
+     */
+    uint8_t state =
+        sleep_tracker_analyze_10_samples(
+            x_samples,
+            y_samples,
+            z_samples
+        );
+
+    uint32_t steps =
+        sleep_tracker_get_steps();
+
+    /*
+     * Print result to OLED display
+     */
+    display_show_accel_data(
+        x_samples[ACCEL_WINDOW_SIZE - 1],
+        y_samples[ACCEL_WINDOW_SIZE - 1],
+        z_samples[ACCEL_WINDOW_SIZE - 1],
+        steps,
+        state
+    );
+}
+
+
+/*
+ * =============================================================================
+ * ACCELEROMETER SCREEN DISPLAY REFRESH
+ * =============================================================================
+ *
+ * Uses the running 10-sample window from sleep_tracker to display live state:
+ * SLEEP, JUST MOVE, or WALK on OLED with zero flickering.
+ * =============================================================================
+ */
+
+static void accelerometer_test(void)
+{
+    int16_t x;
+    int16_t y;
+    int16_t z;
+
+    /*
+     * Update 10-sample tracker and classify motion
+     */
+    sleep_tracker_update();
+    sleep_tracker_get_latest_xyz(&x, &y, &z);
+
+    uint8_t activity =
+        sleep_tracker_get_activity_level();
+
+    uint32_t steps =
+        sleep_tracker_get_steps();
+
+    display_show_accel_data(
+        x,
+        y,
+        z,
+        steps,
+        activity
+    );
 }
 
 
@@ -1820,48 +1899,38 @@ void user_app_init(void)
     app_batt_poll_timer =
         EASY_TIMER_INVALID_TIMER;
 
-
     app_hr_poll_timer =
         EASY_TIMER_INVALID_TIMER;
-
 
     app_param_update_request_timer =
         EASY_TIMER_INVALID_TIMER;
 
-
     app_clock_timer =
         EASY_TIMER_INVALID_TIMER;
 
+    app_sleep_tracker_timer =
+        EASY_TIMER_INVALID_TIMER;
+
+    app_accel_display_timer =
+        EASY_TIMER_INVALID_TIMER;
 
     app_long_press_timer =
         EASY_TIMER_INVALID_TIMER;
 
-
     app_touch_release_timer =
         EASY_TIMER_INVALID_TIMER;
-
 
     app_touch_rearm_timer =
         EASY_TIMER_INVALID_TIMER;
 
 
-    /*
-     * Read initial battery.
-     */
     current_batt_lvl =
         read_battery_level_percentage();
 
-
-    /*
-     * No battery notification has been sent yet.
-     */
     last_sent_batt_lvl =
         255;
 
 
-    /*
-     * Temporary HR test value.
-     */
     current_hr_value =
         155;
 
@@ -1879,45 +1948,69 @@ void user_app_init(void)
     touch_press_active =
         0;
 
-
     long_press_detected =
         0;
-
 
     touch_long_press_lock =
         0;
 
 
-    /*
-     * OLED OFF at boot.
-     */
     display_is_on =
         0;
-
 
     display_sequence =
         DISPLAY_SEQUENCE_TIME;
 
 
-    /*
-     * Existing SDK initialization.
-     */
     default_app_on_init();
 
 
-    /*
-     * Start manual clock.
-     *
-     * The timer itself will remain stopped
-     * until the phone sends the first valid time.
-     */
     start_clock();
 
 
-    /*
-     * Initialize OLED/touch.
-     */
     touch_button_init();
+
+
+    /*
+     ****************************************************************************************
+     * INITIALIZE SLEEP TRACKER
+     ****************************************************************************************
+     */
+
+    sleep_tracker_init();
+
+
+    /*
+     ****************************************************************************************
+     * INITIALIZE ADXL362
+     ****************************************************************************************
+     */
+
+    adxl362_init();
+
+
+    /*
+     ****************************************************************************************
+     * START SLEEP / ACTIVITY TRACKER
+     ****************************************************************************************
+     *
+     * ADXL362 is sampled every 100 ms.
+     *
+     ****************************************************************************************
+     */
+
+    start_sleep_tracker();
+
+
+    /*
+     ****************************************************************************************
+     * DO NOT DRAW ACCELEROMETER HERE
+     ****************************************************************************************
+     *
+     * OLED must remain OFF after boot.
+     *
+     ****************************************************************************************
+     */
 }
 
 
@@ -1958,50 +2051,19 @@ void user_app_connection(
     );
 
 
-    /*
-     ****************************************************************************************
-     * BATTERY TELEMETRY
-     ****************************************************************************************
-     *
-     * First battery reading:
-     *
-     *      1 second after connection
-     *
-     * Then:
-     *
-     *      every 3 minutes
-     *
-     * Notification is only sent when the
-     * battery percentage changes.
-     */
-
     start_battery_polling();
 
-
-    /*
-     ****************************************************************************************
-     * HEART RATE TELEMETRY
-     ****************************************************************************************
-     *
-     * First HR reading:
-     *
-     *      15 seconds after connection
-     *
-     * Then:
-     *
-     *      every 15 seconds
-     *
-     * This gives the HR sensor time to settle.
-     */
 
     start_hr_polling();
 
 
     /*
-     ****************************************************************************************
-     * CONNECTION PARAMETER UPDATE
-     ****************************************************************************************
+     * The sleep tracker was already started
+     * during initialization.
+     *
+     * Do not start another tracker timer here.
      */
+
 
     if (app_param_update_request_timer !=
         EASY_TIMER_INVALID_TIMER)
@@ -2032,30 +2094,16 @@ void user_app_connection(
 void user_app_disconnect(
                     struct gapc_disconnect_ind const *param)
 {
-    /*
-     ****************************************************************************************
-     * STOP TELEMETRY TIMERS
-     ****************************************************************************************
-     */
-
     stop_battery_polling();
 
     stop_hr_polling();
 
+    stop_accel_display();
 
-    /*
-     * Force first battery value to be sent
-     * on the next connection.
-     */
+
     last_sent_batt_lvl =
         255;
 
-
-    /*
-     ****************************************************************************************
-     * CANCEL CONNECTION PARAMETER TIMER
-     ****************************************************************************************
-     */
 
     if (app_param_update_request_timer !=
         EASY_TIMER_INVALID_TIMER)
@@ -2069,12 +2117,6 @@ void user_app_disconnect(
     }
 
 
-    /*
-     ****************************************************************************************
-     * CANCEL LONG PRESS TIMER
-     ****************************************************************************************
-     */
-
     if (app_long_press_timer !=
         EASY_TIMER_INVALID_TIMER)
     {
@@ -2087,12 +2129,6 @@ void user_app_disconnect(
     }
 
 
-    /*
-     ****************************************************************************************
-     * CANCEL RELEASE TIMER
-     ****************************************************************************************
-     */
-
     if (app_touch_release_timer !=
         EASY_TIMER_INVALID_TIMER)
     {
@@ -2104,12 +2140,6 @@ void user_app_disconnect(
             EASY_TIMER_INVALID_TIMER;
     }
 
-
-    /*
-     ****************************************************************************************
-     * CANCEL DELAYED RE-ARM TIMER
-     ****************************************************************************************
-     */
 
     if (app_touch_rearm_timer !=
         EASY_TIMER_INVALID_TIMER)
@@ -2126,10 +2156,8 @@ void user_app_disconnect(
     touch_press_active =
         0;
 
-
     long_press_detected =
         0;
-
 
     touch_long_press_lock =
         0;
@@ -2139,11 +2167,6 @@ void user_app_disconnect(
         GAP_INVALID_CONIDX;
 
 
-    /*
-     * DO NOT stop clock.
-     *
-     * DO NOT stop touch detection.
-     */
     default_app_on_disconnect(param);
 }
 
@@ -2196,25 +2219,11 @@ void user_catch_rest_hndl(
          * ================================================================
          * CLOCK WRITE
          * ================================================================
-         *
-         * Phone sends exactly two raw bytes:
-         *
-         *      byte 0 = hour
-         *      byte 1 = minute
-         *
-         * Example:
-         *
-         *      14:35
-         *
-         *      0E 23
-         *
-         * Only the Clock characteristic is accepted.
-         *
-         * This prevents battery/HR writes from
-         * accidentally changing the clock.
          */
+
         case CUSTS1_VAL_WRITE_IND:
         {
+					  latency_touch_timestamp = GET_TIMESTAMP();
             struct custs1_val_write_ind const *msg_param;
 
 
@@ -2236,6 +2245,7 @@ void user_catch_rest_hndl(
              * ONLY accept writes to the Clock
              * characteristic.
              */
+
             if ((msg_param->handle ==
                  SVC3_IDX_CLOCK_VAL_VAL) &&
                 (msg_param->length >= 2))
@@ -2247,26 +2257,19 @@ void user_catch_rest_hndl(
                 hour =
                     msg_param->value[0];
 
-
                 minute =
                     msg_param->value[1];
 
 
-                /*
-                 * Validate received time.
-                 */
                 if ((hour < 24) &&
                     (minute < 60))
                 {
-                    /*
-                     * Store phone time and
-                     * restart the one-minute
-                     * clock timer.
-                     */
                     app_clock_set_time(
                         hour,
                         minute
                     );
+									
+									  latency_test = (latency_touch_timestamp - GET_TIMESTAMP()) / 16;
                 }
             }
         }
@@ -2286,7 +2289,7 @@ void user_catch_rest_hndl(
 
 
             ind =
-                (struct gattc_event_ind const *)param;
+                (const struct gattc_event_ind *)param;
 
 
             if (ind == NULL)
@@ -2319,3 +2322,4 @@ void user_catch_rest_hndl(
             break;
     }
 }
+

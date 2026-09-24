@@ -1,4 +1,4 @@
-./out_da14585/objects/display.o: ..\src\platform\display.c \
+./out_da14585/objects/adxl362.o: ..\src\platform\adxl362.c \
   ..\src\config\da1458x_config_basic.h \
   ..\src\config\da14585_config_basic.h \
   ..\..\..\..\..\sdk\common_project_files\da1458x_stack_config.h \
@@ -71,4 +71,11 @@
   ..\..\..\..\..\sdk\ble_stack\profiles\prf_types.h \
   ..\..\..\..\..\sdk\ble_stack\profiles\prf.h \
   ..\..\..\..\..\sdk\app_modules\api\app_adv_data.h \
-  ..\src\config\display.h ..\src\config\sleep_tracker.h
+  ..\src\config\adxl362.h ..\src\config\user_periph_setup.h \
+  ..\..\..\..\..\sdk\platform\driver\uart\uart.h \
+  ..\..\..\..\..\sdk\platform\driver\dma\dma.h \
+  ..\..\..\..\..\sdk\platform\driver\spi\spi.h \
+  ..\..\..\..\..\sdk\platform\driver\spi\spi_58x.h \
+  ..\..\..\..\..\sdk\platform\driver\spi_flash\spi_flash.h \
+  ..\..\..\..\..\sdk\platform\driver\i2c\i2c.h \
+  ..\..\..\..\..\sdk\platform\driver\i2c_eeprom\i2c_eeprom.h

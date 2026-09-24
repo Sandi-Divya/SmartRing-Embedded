@@ -144,6 +144,21 @@ void user_catch_rest_hndl(ke_msg_id_t const msgid,
                           ke_task_id_t const dest_id,
                           ke_task_id_t const src_id);
 
+/**
+ ****************************************************************************************
+ * @brief Provides the slave preferred connection parameters.
+ * @param[in] slv_params Pointer to the slave preferred parameters structure.
+ ****************************************************************************************
+*/
+void user_app_get_dev_slv_pref_params(struct gap_slv_pref *slv_params);
+
+/**
+ ****************************************************************************************
+ * @brief Gathers 10 samples from ADXL362, classifies (SLEEP/JUST MOVE/WALK) and prints to OLED.
+ ****************************************************************************************
+*/
+void accel_sample_and_display_state(void);
+
 /// @} APP
 
 #endif // _USER_PERIPHERAL_H_
