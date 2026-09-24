@@ -1710,6 +1710,8 @@ export default function App() {
                     >
                       {motionMetrics?.isWalking
                         ? `Walking (${motionMetrics.cadenceSPM} SPM)`
+                        : (motionMetrics?.candidateSteps ?? 0) > 0
+                        ? 'Step Detected'
                         : motionMetrics?.activityState === 'moving'
                         ? 'Moving'
                         : motionMetrics?.activityState === 'sleeping'
@@ -2853,6 +2855,8 @@ export default function App() {
                   >
                     {motionMetrics?.isWalking
                       ? `WALKING ACTIVE · ${motionMetrics.cadenceSPM} SPM · ${motionMetrics.walkingPace.toUpperCase()} PACE`
+                      : (motionMetrics?.candidateSteps ?? 0) > 0
+                      ? 'RHYTHMIC STEP DETECTED · VERIFYING'
                       : motionMetrics?.activityState === 'moving'
                       ? 'ACTIVE HAND/BODY MOVEMENT'
                       : motionMetrics?.activityState === 'sleeping'
@@ -3162,22 +3166,22 @@ export default function App() {
               <View style={styles.card}>
                 <View style={styles.cardHeader}>
                   <View>
-                    <Text style={styles.sectionLabel}>RAW ACCELEROMETER</Text>
-                    <Text style={styles.featureTitle}>3-Axis Readings</Text>
+                    <Text style={styles.sectionLabel}>SMOOTH ACCELEROMETER</Text>
+                    <Text style={styles.featureTitle}>Filtered Motion Readings</Text>
                   </View>
-                  <View style={styles.ratePill}>
-                    <Text style={styles.ratePillText}>
-                      {motionMetrics?.sampleRateHz ?? 10} Hz Stream
+                  <View style={[styles.ratePill, { backgroundColor: '#10B98120' }]}>
+                    <Text style={[styles.ratePillText, { color: '#10B981' }]}>
+                      DSP Filter Active
                     </Text>
                   </View>
                 </View>
 
-                {/* X Axis */}
+                {/* X Axis (Filtered) */}
                 <View style={styles.axisMeterRow}>
                   <View style={styles.axisMeterLabelCol}>
-                    <Text style={styles.axisMeterName}>X AXIS</Text>
+                    <Text style={styles.axisMeterName}>X (SMOOTH)</Text>
                     <Text style={styles.axisMeterVal}>
-                      {motionMetrics?.latestSample?.x ?? 0}
+                      {motionMetrics?.filteredSample?.x ?? 0}
                     </Text>
                   </View>
                   <View style={styles.axisMeterTrack}>
@@ -3189,7 +3193,7 @@ export default function App() {
                             100,
                             Math.max(
                               0,
-                              50 + ((motionMetrics?.latestSample?.x ?? 0) / 2048) * 50
+                              50 + ((motionMetrics?.filteredSample?.x ?? 0) / 2048) * 50
                             )
                           )}%`,
                           backgroundColor: '#3B82F6',
@@ -3199,12 +3203,12 @@ export default function App() {
                   </View>
                 </View>
 
-                {/* Y Axis */}
+                {/* Y Axis (Filtered) */}
                 <View style={styles.axisMeterRow}>
                   <View style={styles.axisMeterLabelCol}>
-                    <Text style={styles.axisMeterName}>Y AXIS</Text>
+                    <Text style={styles.axisMeterName}>Y (SMOOTH)</Text>
                     <Text style={styles.axisMeterVal}>
-                      {motionMetrics?.latestSample?.y ?? 0}
+                      {motionMetrics?.filteredSample?.y ?? 0}
                     </Text>
                   </View>
                   <View style={styles.axisMeterTrack}>
@@ -3216,7 +3220,7 @@ export default function App() {
                             100,
                             Math.max(
                               0,
-                              50 + ((motionMetrics?.latestSample?.y ?? 0) / 2048) * 50
+                              50 + ((motionMetrics?.filteredSample?.y ?? 0) / 2048) * 50
                             )
                           )}%`,
                           backgroundColor: '#10B981',
@@ -3226,12 +3230,12 @@ export default function App() {
                   </View>
                 </View>
 
-                {/* Z Axis */}
+                {/* Z Axis (Filtered) */}
                 <View style={styles.axisMeterRow}>
                   <View style={styles.axisMeterLabelCol}>
-                    <Text style={styles.axisMeterName}>Z AXIS</Text>
+                    <Text style={styles.axisMeterName}>Z (SMOOTH)</Text>
                     <Text style={styles.axisMeterVal}>
-                      {motionMetrics?.latestSample?.z ?? 0}
+                      {motionMetrics?.filteredSample?.z ?? 0}
                     </Text>
                   </View>
                   <View style={styles.axisMeterTrack}>
@@ -3243,7 +3247,7 @@ export default function App() {
                             100,
                             Math.max(
                               0,
-                              50 + ((motionMetrics?.latestSample?.z ?? 0) / 2048) * 50
+                              50 + ((motionMetrics?.filteredSample?.z ?? 0) / 2048) * 50
                             )
                           )}%`,
                           backgroundColor: '#8B5CF6',
@@ -3253,22 +3257,60 @@ export default function App() {
                   </View>
                 </View>
 
-                {/* Vector Magnitude & Delta */}
+                {/* Vector Magnitude & Dynamic Motion Energy */}
                 <View style={styles.statsGrid}>
                   <View style={styles.statsGridItem}>
-                    <Text style={styles.statsGridLabel}>MAGNITUDE (SVM)</Text>
+                    <Text style={styles.statsGridLabel}>MAGNITUDE</Text>
                     <Text style={styles.statsGridValue}>
                       {motionMetrics?.magnitude ?? 0}
                     </Text>
-                    <Text style={styles.statsGridSub}>√(X²+Y²+Z²)</Text>
+                    <Text style={styles.statsGridSub}>Filtered Vector</Text>
                   </View>
                   <View style={styles.statsGridItem}>
-                    <Text style={styles.statsGridLabel}>MOTION DELTA</Text>
-                    <Text style={styles.statsGridValue}>
-                      {motionMetrics?.motionDelta ?? 0}
+                    <Text style={styles.statsGridLabel}>DYNAMIC MOTION</Text>
+                    <Text style={[styles.statsGridValue, { color: (motionMetrics?.filteredSample?.dynMag ?? 0) > 0 ? '#10B981' : '#6B7280' }]}>
+                      {motionMetrics?.filteredSample?.dynMag ?? 0}
                     </Text>
-                    <Text style={styles.statsGridSub}>|ΔX|+|ΔY|+|ΔZ|</Text>
+                    <Text style={styles.statsGridSub}>
+                      {(motionMetrics?.filteredSample?.dynMag ?? 0) === 0 ? 'Stationary (0)' : 'Active Movement'}
+                    </Text>
                   </View>
+                </View>
+              </View>
+
+              {/* RAW ACCELEROMETER DIAGNOSTICS CARD */}
+              <View style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <View>
+                    <Text style={styles.sectionLabel}>RAW UNFILTERED</Text>
+                    <Text style={styles.featureTitle}>ADXL362 Direct Bus</Text>
+                  </View>
+                  <View style={styles.ratePill}>
+                    <Text style={styles.ratePillText}>
+                      {motionMetrics?.sampleRateHz ?? 10} Hz
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Raw X / Y / Z</Text>
+                  <Text style={styles.infoValMono}>
+                    {motionMetrics?.latestSample?.x ?? 0}, {motionMetrics?.latestSample?.y ?? 0}, {motionMetrics?.latestSample?.z ?? 0}
+                  </Text>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Filtered Motion Delta</Text>
+                  <Text style={styles.infoVal}>
+                    {motionMetrics?.motionDelta ?? 0}
+                  </Text>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Noise Suppression</Text>
+                  <Text style={[styles.infoVal, { color: '#10B981' }]}>
+                    EMA Low-Pass + Deadband
+                  </Text>
                 </View>
               </View>
 
