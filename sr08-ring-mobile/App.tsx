@@ -3150,8 +3150,30 @@ export default function App() {
                 <Text style={styles.progressSubtext}>
                   {motionMetrics?.isSleeping
                     ? 'User is sleeping. Accelerometer tracking continuous stillness.'
-                    : 'Awake. Sleep tracking begins automatically after 3 minutes of stillness.'}
+                    : `Awake · Resting stillness: ${motionMetrics?.stillnessSeconds ?? 0}s / ${motionMetrics?.stillnessTargetSeconds ?? 60}s to sleep onset`}
                 </Text>
+
+                {/* Progress bar towards sleep onset when awake */}
+                {!motionMetrics?.isSleeping && (
+                  <View style={styles.progressBarContainer}>
+                    <View
+                      style={[
+                        styles.progressBarFill,
+                        {
+                          width: `${Math.min(
+                            100,
+                            Math.round(
+                              ((motionMetrics?.stillnessSeconds ?? 0) /
+                                (motionMetrics?.stillnessTargetSeconds || 60)) *
+                                100
+                            )
+                          )}%`,
+                          backgroundColor: '#8B5CF6',
+                        },
+                      ]}
+                    />
+                  </View>
+                )}
 
                 {/* Sleep Metrics Grid */}
                 <View style={styles.statsGrid}>

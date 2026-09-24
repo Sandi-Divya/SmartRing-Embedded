@@ -85,6 +85,8 @@ export interface MotionMetrics {
   deepSleepMinutes: number;
   lightSleepMinutes: number;
   sleepSessionStart: Date | null;
+  stillnessSeconds: number;
+  stillnessTargetSeconds: number;
 }
 
 export class MotionAnalyticsEngine {
@@ -94,16 +96,27 @@ export class MotionAnalyticsEngine {
   private prevFiltY = 0;
   private prevFiltZ = 0;
 
+  // Median-3 sliding window for glitch/spike rejection
+  private rawXWindow: number[] = [];
+  private rawYWindow: number[] = [];
+  private rawZWindow: number[] = [];
+
   // DSP Filter state
   private isFilterInitialized = false;
   private filtX = 0;
   private filtY = 0;
   private filtZ = 0;
 
-  // Filter Coefficients (calibrated for 10 Hz sampling)
-  private readonly ALPHA_LP = 0.40;            // Low-pass smoothing
+  // Stabilized coordinates (deadband hysteresis against stationary sensor jitter)
+  private stableX = 0;
+  private stableY = 0;
+  private stableZ = 0;
+
+  // Filter Coefficients (calibrated for ADXL362 at 10 Hz sampling)
+  private readonly ALPHA_LP = 0.22;            // 2-pole smoothed low-pass filter
   private readonly BETA_BASE = 0.04;           // Gravity baseline tracking
-  private readonly NOISE_DEADBAND = 3.5;       // Sensor noise floor (~3.5 LSB max stationary)
+  private readonly NOISE_DEADBAND = 14.0;      // Sensor noise floor (~14 LSB stationary deadband)
+  private readonly COORD_DEADBAND = 12.0;      // Stationary coordinate jitter suppression (~12 LSB)
   private baseMag = 1000;                      // Running baseline magnitude (gravity estimate)
 
   // Packets & Rate
@@ -127,9 +140,9 @@ export class MotionAnalyticsEngine {
   private candidateStepTimes: number[] = [];
 
   // Pedometer thresholds (LSB, calibrated for ADXL362 at 10 Hz, 1000 LSB = 1g)
-  private readonly CREST_MIN = 15.0;            // Dynamic acceleration crest must reach at least +15 mg
-  private readonly TROUGH_MAX = -10.0;          // Dynamic acceleration trough must dip below -10 mg
-  private readonly VPP_MIN = 26.0;              // Peak-to-Valley amplitude >= 26 mg
+  private readonly CREST_MIN = 22.0;            // Dynamic acceleration crest must reach at least +22 mg
+  private readonly TROUGH_MAX = -14.0;          // Dynamic acceleration trough must dip below -14 mg
+  private readonly VPP_MIN = 38.0;              // Peak-to-Valley amplitude >= 38 mg
   private readonly CADENCE_MIN_MS = 280;        // Max ~214 SPM (running)
   private readonly CADENCE_MAX_MS = 1250;       // Min ~48 SPM (slow stroll)
   private readonly WALKING_TIMEOUT_MS = 1600;   // 1.6s without verified step ends walking session
@@ -139,14 +152,14 @@ export class MotionAnalyticsEngine {
   private harWindow: { x: number; y: number; z: number; mag: number }[] = [];
   private currentHarPrediction: HarPrediction = {
     activity: 'SITTING',
-    confidence: 85,
+    confidence: 88,
     probabilities: {
       WALKING: 0,
       WALKING_UPSTAIRS: 0,
       WALKING_DOWNSTAIRS: 0,
-      SITTING: 0.85,
-      STANDING: 0.12,
-      LAYING: 0.03,
+      SITTING: 0.88,
+      STANDING: 0.08,
+      LAYING: 0.04,
     },
     cadenceSPM: 0,
   };
@@ -157,7 +170,9 @@ export class MotionAnalyticsEngine {
   private restingSamples = 0;
   private currentActivityState: ActivityState = 'resting';
   private wasActiveLastSample = false;
-  private readonly MOVE_ENERGY_THRESHOLD = 9.0; // Filtered dynamic energy for active move
+  private readonly MOVE_ENERGY_THRESHOLD = 28.0; // Filtered dynamic energy for active move
+  private activeStreak = 0;
+  private lastMoveTime = 0;
 
   // Sleep tracking state
   private continuousStillnessMs = 0;
@@ -169,10 +184,23 @@ export class MotionAnalyticsEngine {
   private restlessCount = 0;
   private currentSleepStage: SleepStage = 'awake';
   private restlessStartTime = 0;
-  private readonly SLEEP_ONSET_DELAY_MS = 180000; // 3 minutes of continuous stillness -> sleep
+  private readonly SLEEP_ONSET_DELAY_MS = 60000;  // 60s of resting stillness -> sleep
+  private readonly SLEEP_ONSET_LAYING_MS = 35000; // 35s if lying horizontal in bed -> sleep
+
+  private medianOf3(arr: number[]): number {
+    if (arr.length === 0) return 0;
+    if (arr.length < 3) return arr[arr.length - 1];
+    const a = arr[arr.length - 3];
+    const b = arr[arr.length - 2];
+    const c = arr[arr.length - 1];
+    return Math.max(Math.min(a, b), Math.min(Math.max(a, b), c));
+  }
 
   public resetAll(): void {
     this.prevRawSample = null;
+    this.rawXWindow = [];
+    this.rawYWindow = [];
+    this.rawZWindow = [];
     this.prevFiltX = 0;
     this.prevFiltY = 0;
     this.prevFiltZ = 0;
@@ -180,6 +208,9 @@ export class MotionAnalyticsEngine {
     this.filtX = 0;
     this.filtY = 0;
     this.filtZ = 0;
+    this.stableX = 0;
+    this.stableY = 0;
+    this.stableZ = 0;
     this.baseMag = 1000;
     this.packetsCount = 0;
     this.stepCount = 0;
@@ -195,20 +226,22 @@ export class MotionAnalyticsEngine {
     this.harWindow = [];
     this.currentHarPrediction = {
       activity: 'SITTING',
-      confidence: 85,
+      confidence: 88,
       probabilities: {
         WALKING: 0,
         WALKING_UPSTAIRS: 0,
         WALKING_DOWNSTAIRS: 0,
-        SITTING: 0.85,
-        STANDING: 0.12,
-        LAYING: 0.03,
+        SITTING: 0.88,
+        STANDING: 0.08,
+        LAYING: 0.04,
       },
       cadenceSPM: 0,
     };
     this.movesCount = 0;
     this.activeSamples = 0;
     this.restingSamples = 0;
+    this.activeStreak = 0;
+    this.lastMoveTime = 0;
     this.currentActivityState = 'resting';
     this.wasActiveLastSample = false;
     this.continuousStillnessMs = 0;
@@ -251,6 +284,7 @@ export class MotionAnalyticsEngine {
     this.movesCount = 0;
     this.activeSamples = 0;
     this.restingSamples = 0;
+    this.activeStreak = 0;
   }
 
   /**
@@ -274,7 +308,7 @@ export class MotionAnalyticsEngine {
     }
 
     // =========================================================================
-    // STAGE 1: SPI Glitch / Outlier Clamping
+    // STAGE 1: SPI Glitch / Outlier Clamping & Median-3 Rejection Filter
     // =========================================================================
     let rawX = sample.x;
     let rawY = sample.y;
@@ -293,27 +327,59 @@ export class MotionAnalyticsEngine {
       }
     }
 
+    this.rawXWindow.push(rawX);
+    this.rawYWindow.push(rawY);
+    this.rawZWindow.push(rawZ);
+    if (this.rawXWindow.length > 5) {
+      this.rawXWindow.shift();
+      this.rawYWindow.shift();
+      this.rawZWindow.shift();
+    }
+
+    const medX = this.medianOf3(this.rawXWindow);
+    const medY = this.medianOf3(this.rawYWindow);
+    const medZ = this.medianOf3(this.rawZWindow);
+
     // =========================================================================
     // STAGE 2: 3-Axis Low-Pass Filter (EMA)
     // =========================================================================
     if (!this.isFilterInitialized) {
-      this.filtX = rawX;
-      this.filtY = rawY;
-      this.filtZ = rawZ;
-      this.prevFiltX = rawX;
-      this.prevFiltY = rawY;
-      this.prevFiltZ = rawZ;
+      this.filtX = medX;
+      this.filtY = medY;
+      this.filtZ = medZ;
+      this.stableX = Math.round(medX);
+      this.stableY = Math.round(medY);
+      this.stableZ = Math.round(medZ);
+      this.prevFiltX = medX;
+      this.prevFiltY = medY;
+      this.prevFiltZ = medZ;
+      this.baseMag = Math.round(
+        Math.sqrt(medX * medX + medY * medY + medZ * medZ)
+      );
       this.isFilterInitialized = true;
     } else {
-      this.filtX += this.ALPHA_LP * (rawX - this.filtX);
-      this.filtY += this.ALPHA_LP * (rawY - this.filtY);
-      this.filtZ += this.ALPHA_LP * (rawZ - this.filtZ);
+      this.filtX += this.ALPHA_LP * (medX - this.filtX);
+      this.filtY += this.ALPHA_LP * (medY - this.filtY);
+      this.filtZ += this.ALPHA_LP * (medZ - this.filtZ);
     }
 
     // =========================================================================
-    // STAGE 3: Total Magnitude & Gravity Baseline Tracking
+    // STAGE 3: Coordinate Stability Hysteresis (Deadband on stationary coordinates)
     // =========================================================================
-    // Total magnitude of filtered acceleration (including 1g gravity)
+    const dCoordFromStable =
+      Math.abs(this.filtX - this.stableX) +
+      Math.abs(this.filtY - this.stableY) +
+      Math.abs(this.filtZ - this.stableZ);
+
+    if (dCoordFromStable >= this.COORD_DEADBAND) {
+      this.stableX = Math.round(this.filtX);
+      this.stableY = Math.round(this.filtY);
+      this.stableZ = Math.round(this.filtZ);
+    }
+
+    // =========================================================================
+    // STAGE 4: Total Magnitude & Gravity Baseline Tracking
+    // =========================================================================
     const filteredMag = Math.round(
       Math.sqrt(this.filtX * this.filtX + this.filtY * this.filtY + this.filtZ * this.filtZ)
     );
@@ -325,10 +391,8 @@ export class MotionAnalyticsEngine {
     }
 
     // =========================================================================
-    // STAGE 4: Bipolar Dynamic Acceleration & Deadband Noise Suppression
+    // STAGE 5: Bipolar Dynamic Acceleration & Deadband Noise Suppression
     // =========================================================================
-    // Dynamic acceleration swings positive on foot impact/acceleration and
-    // negative during recoil/unloading.
     let dynAcc = filteredMag - this.baseMag;
     if (Math.abs(dynAcc) < this.NOISE_DEADBAND) {
       dynAcc = 0;
@@ -337,20 +401,20 @@ export class MotionAnalyticsEngine {
     const cleanEnergy = Math.round(Math.abs(dynAcc));
 
     const currentFiltered: FilteredSample = {
-      x: Math.round(this.filtX),
-      y: Math.round(this.filtY),
-      z: Math.round(this.filtZ),
+      x: this.stableX,
+      y: this.stableY,
+      z: this.stableZ,
       mag: filteredMag,
       dynMag: cleanEnergy,
     };
 
     // =========================================================================
-    // STAGE 5: Temporal Sliding Window & ML Human Activity Recognition (HAR)
+    // STAGE 6: Temporal Sliding Window & ML Human Activity Recognition (HAR)
     // =========================================================================
     this.harWindow.push({
-      x: Math.round(this.filtX),
-      y: Math.round(this.filtY),
-      z: Math.round(this.filtZ),
+      x: this.stableX,
+      y: this.stableY,
+      z: this.stableZ,
       mag: filteredMag,
     });
     if (this.harWindow.length > this.HAR_WINDOW_SIZE) {
@@ -361,17 +425,14 @@ export class MotionAnalyticsEngine {
     this.currentHarPrediction = this.inferHarActivity();
 
     // =========================================================================
-    // STAGE 6: Bipolar Wave Pedometer with ML Rhythm Coordination
+    // STAGE 7: Bipolar Wave Pedometer with ML Rhythm Coordination
     // =========================================================================
-    // Human walking produces alternating crests and troughs across the gravity baseline.
-    // General non-walking movements fail to produce symmetric peak-valley pairs with
-    // regular periodicity.
     if (this.waveState === 'SEARCH_CREST') {
       if (dynAcc > this.crestVal) {
         this.crestVal = dynAcc;
         this.crestTime = now;
       }
-      if (this.crestVal >= this.CREST_MIN && dynAcc < this.crestVal - 6.0) {
+      if (this.crestVal >= this.CREST_MIN && dynAcc < this.crestVal - 8.0) {
         this.waveState = 'SEARCH_TROUGH';
         this.troughVal = dynAcc;
       }
@@ -379,7 +440,7 @@ export class MotionAnalyticsEngine {
       if (dynAcc < this.troughVal) {
         this.troughVal = dynAcc;
       }
-      if (this.troughVal <= this.TROUGH_MAX && dynAcc > this.troughVal + 5.0) {
+      if (this.troughVal <= this.TROUGH_MAX && dynAcc > this.troughVal + 7.0) {
         const vpp = this.crestVal - this.troughVal;
         if (vpp >= this.VPP_MIN) {
           this.handleStepCycle(this.crestTime);
@@ -394,9 +455,10 @@ export class MotionAnalyticsEngine {
     }
 
     // Walking session timeout: 1.6s without verified step ends walking session
-    const lastActiveTime = this.candidateStepTimes.length > 0
-      ? this.candidateStepTimes[this.candidateStepTimes.length - 1]
-      : this.lastConfirmedStepTime;
+    const lastActiveTime =
+      this.candidateStepTimes.length > 0
+        ? this.candidateStepTimes[this.candidateStepTimes.length - 1]
+        : this.lastConfirmedStepTime;
 
     if (this.isWalking) {
       if (now - lastActiveTime > this.WALKING_TIMEOUT_MS) {
@@ -404,52 +466,59 @@ export class MotionAnalyticsEngine {
         this.currentCadenceSPM = 0;
         this.candidateStepTimes = [];
       } else {
-        this.walkingSeconds += 0.1; // ~100 ms per sample
+        this.walkingSeconds += 0.1;
       }
     } else if (now - lastActiveTime > this.WALKING_TIMEOUT_MS) {
       this.candidateStepTimes = [];
     }
 
     // =========================================================================
-    // STAGE 7: Moves & Activity Classification (Enhanced by ML HAR)
+    // STAGE 8: Moves & Activity Classification (Immune to stationary noise)
     // =========================================================================
-    const isMoving = cleanEnergy >= this.MOVE_ENERGY_THRESHOLD;
+    const isActivelyMoving =
+      cleanEnergy >= this.MOVE_ENERGY_THRESHOLD || dCoordFromStable >= 45.0;
     const isMlWalking =
       this.currentHarPrediction.activity === 'WALKING' ||
       this.currentHarPrediction.activity === 'WALKING_UPSTAIRS' ||
       this.currentHarPrediction.activity === 'WALKING_DOWNSTAIRS';
+    const isWalkingOrCandidate = this.isWalking || isMlWalking;
 
-    if (isMoving && !isMlWalking) {
-      this.activeSamples++;
-      if (!this.wasActiveLastSample) {
+    if (isActivelyMoving && !isWalkingOrCandidate) {
+      this.activeStreak++;
+      // Debounce: must be active for at least 2 consecutive samples and spaced by 1.2s
+      if (this.activeStreak >= 2 && now - this.lastMoveTime > 1200) {
         this.movesCount++;
+        this.lastMoveTime = now;
         this.wasActiveLastSample = true;
       }
-    } else if (isMlWalking) {
       this.activeSamples++;
+    } else if (isWalkingOrCandidate) {
+      this.activeSamples++;
+      this.activeStreak = 0;
       this.wasActiveLastSample = false;
     } else {
       this.restingSamples++;
-      if (cleanEnergy === 0) {
+      this.activeStreak = 0;
+      if (cleanEnergy === 0 && dCoordFromStable < 15.0) {
         this.wasActiveLastSample = false;
       }
     }
 
     // =========================================================================
-    // STAGE 8: Sleep Time & Sleep Stage Tracking (Assisted by ML HAR)
+    // STAGE 9: Sleep Time & Sleep Stage Tracking (Leaky Inactivity Accumulator)
     // =========================================================================
-    const isCompletelyStill = cleanEnergy === 0;
+    const isRestful =
+      cleanEnergy <= 16.0 && dCoordFromStable <= 24.0 && !isWalkingOrCandidate;
     const isLaying = this.currentHarPrediction.activity === 'LAYING';
+    const targetDelayMs = isLaying
+      ? this.SLEEP_ONSET_LAYING_MS
+      : this.SLEEP_ONSET_DELAY_MS;
 
-    if (isCompletelyStill || isLaying) {
+    if (isRestful || isLaying) {
       this.continuousStillnessMs += 100;
 
       if (!this.isSleeping) {
-        // Must maintain uninterrupted stillness for 3 minutes (or 1 min laying) to enter sleep state
-        if (
-          this.continuousStillnessMs >= this.SLEEP_ONSET_DELAY_MS ||
-          (isLaying && this.continuousStillnessMs >= 60000)
-        ) {
+        if (this.continuousStillnessMs >= targetDelayMs) {
           this.isSleeping = true;
           this.sleepStartTimestamp = now - this.continuousStillnessMs;
           this.totalSleepMs += this.continuousStillnessMs;
@@ -459,8 +528,8 @@ export class MotionAnalyticsEngine {
         // Actively sleeping: accumulate duration
         this.totalSleepMs += 100;
 
-        // Sustained deep stillness > 8 minutes = deep sleep
-        if (this.continuousStillnessMs > 480000) {
+        // Sustained deep stillness > 2 minutes with very low motion -> deep sleep
+        if (this.continuousStillnessMs > 120000 && cleanEnergy <= 8.0) {
           this.deepSleepMs += 100;
           this.currentSleepStage = 'deep';
         } else {
@@ -468,31 +537,33 @@ export class MotionAnalyticsEngine {
           this.currentSleepStage = 'light';
         }
       }
-    } else {
-      // Movement during sleep
-      this.continuousStillnessMs = 0;
-
+    } else if (cleanEnergy >= 45.0 || isWalkingOrCandidate) {
+      // Sustained vigorous movement or walking
       if (this.isSleeping) {
-        if (cleanEnergy >= this.CREST_MIN * 1.5) {
-          // Significant movement burst while asleep
-          if (this.restlessStartTime === 0) {
-            this.restlessStartTime = now;
-            this.restlessCount++;
-            this.currentSleepStage = 'restless';
-          } else if (now - this.restlessStartTime > 45000) {
-            // Sustained active movement for > 45s -> Wake up!
-            this.isSleeping = false;
-            this.currentSleepStage = 'awake';
-            this.restlessStartTime = 0;
-          }
-        } else {
-          // Minor micro-twitch, maintain sleep
-          this.totalSleepMs += 100;
-          this.lightSleepMs += 100;
+        if (this.restlessStartTime === 0) {
+          this.restlessStartTime = now;
+          this.restlessCount++;
+          this.currentSleepStage = 'restless';
+        } else if (now - this.restlessStartTime > 30000 || this.isWalking) {
+          // Sustained active movement for > 30s or walking -> Wake up!
+          this.isSleeping = false;
+          this.currentSleepStage = 'awake';
           this.restlessStartTime = 0;
+          this.continuousStillnessMs = 0;
         }
       } else {
-        this.currentSleepStage = 'awake';
+        // Active movement resets stillness onset timer
+        this.continuousStillnessMs = 0;
+      }
+    } else {
+      // Minor micro-disturbance (between 16 and 45 LSB):
+      // Leaky accumulator: deduct small penalty instead of wiping out the entire timer!
+      if (!this.isSleeping) {
+        this.continuousStillnessMs = Math.max(0, this.continuousStillnessMs - 300);
+      } else {
+        // Micro-shift during sleep: keep sleeping, stay in light sleep
+        this.totalSleepMs += 100;
+        this.lightSleepMs += 100;
       }
     }
 
@@ -503,7 +574,7 @@ export class MotionAnalyticsEngine {
       this.currentActivityState = 'walking';
     } else if (
       this.wasActiveLastSample ||
-      this.currentHarPrediction.activity === 'STANDING'
+      (this.currentHarPrediction.activity === 'STANDING' && cleanEnergy >= 20.0)
     ) {
       this.currentActivityState = 'moving';
     } else {
@@ -596,6 +667,8 @@ export class MotionAnalyticsEngine {
         this.sleepStartTimestamp > 0
           ? new Date(this.sleepStartTimestamp)
           : null,
+      stillnessSeconds: Math.round(this.continuousStillnessMs / 1000),
+      stillnessTargetSeconds: Math.round(targetDelayMs / 1000),
     };
   }
 
@@ -752,10 +825,10 @@ export class MotionAnalyticsEngine {
       }
     }
 
-    // Orientation check: horizontal (arm laying down in bed) vs upright
+    // Orientation check: horizontal (arm laying down in bed or flat on table) vs upright
     const isHorizontal =
-      Math.abs(meanZ) < 550 &&
-      (Math.abs(meanX) > 400 || Math.abs(meanY) > 400);
+      Math.abs(meanZ) < 650 &&
+      (Math.abs(meanX) > 350 || Math.abs(meanY) > 350);
 
     // Compute activity class logits
     let logitWalking = -2.0;
@@ -765,42 +838,42 @@ export class MotionAnalyticsEngine {
     let logitStanding = 0.0;
     let logitLaying = -1.0;
 
-    if (mad < 4.0 && stdMag < 4.5) {
-      // Stillness
-      if (isHorizontal || this.continuousStillnessMs > 120000) {
+    if (mad < 16.0) {
+      // Sedentary stillness (sitting at desk, lying in bed, stationary)
+      if (isHorizontal || this.continuousStillnessMs > 25000) {
         logitLaying = 4.8;
-        logitSitting = 0.5;
-        logitStanding = -1.0;
+        logitSitting = 1.0;
+        logitStanding = -2.0;
       } else {
-        logitSitting = 4.2;
-        logitStanding = 2.0;
-        logitLaying = 0.5;
+        logitSitting = 4.6;
+        logitStanding = 1.0;
+        logitLaying = 0.0;
       }
-      logitWalking = -5.0;
-      logitUpstairs = -5.0;
-      logitDownstairs = -5.0;
-    } else if (mad >= 13.0 && maxR >= 0.35) {
+      logitWalking = -6.0;
+      logitUpstairs = -6.0;
+      logitDownstairs = -6.0;
+    } else if (mad >= 22.0 && maxR >= 0.38 && bestLag >= 4 && bestLag <= 11) {
       // Rhythmic periodic gait detected!
       const rScore = Math.min(4.0, maxR * 4.5);
-      logitWalking = 2.8 + rScore;
+      logitWalking = 3.5 + rScore;
 
       // Incline estimation from vertical axis bias
       if (meanZ > 800) {
-        logitUpstairs = 1.2 + rScore * 0.7;
+        logitUpstairs = 1.5 + rScore * 0.7;
         logitDownstairs = 0.5;
       } else if (meanZ < -300) {
-        logitDownstairs = 1.2 + rScore * 0.7;
+        logitDownstairs = 1.5 + rScore * 0.7;
         logitUpstairs = 0.5;
       }
       logitSitting = -4.0;
-      logitStanding = -3.0;
+      logitStanding = -2.0;
       logitLaying = -6.0;
     } else {
-      // Non-periodic active movement / fidgeting / gesturing
-      logitStanding = 3.2 + Math.min(2.0, mad / 20);
-      logitSitting = 1.5;
-      logitWalking = 0.0;
-      logitLaying = -3.0;
+      // Non-periodic active movement / fidgeting / gesturing / standing
+      logitStanding = 3.5 + Math.min(2.0, mad / 25);
+      logitSitting = 1.2;
+      logitWalking = -1.0;
+      logitLaying = -4.0;
     }
 
     // Softmax probabilities
