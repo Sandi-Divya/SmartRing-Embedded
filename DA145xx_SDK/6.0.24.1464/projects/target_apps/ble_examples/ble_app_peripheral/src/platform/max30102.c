@@ -302,7 +302,8 @@ static bool s_sensor_present = false;
 
 /* Digital filter variables */
 static int32_t s_dc_filter = 0;
-static int32_t s_lp_buf[3] = {0, 0, 0};
+#define LP_FILTER_TAPS 5
+static int32_t s_lp_buf[LP_FILTER_TAPS] = {0};
 static uint8_t s_lp_idx = 0;
 static int32_t s_prev_sample = 0;
 static int32_t s_prev2_sample = 0;
@@ -311,8 +312,12 @@ static uint32_t s_sample_count = 0;
 static uint32_t s_last_peak_sample = 0;
 static bool s_finger_present = false;
 
+/* Dynamic peak and interval tracker */
+static int32_t s_peak_amplitude = 120;
+static uint32_t s_avg_interval = 38;
+
 #define MAX_BEATS_IN_WINDOW 16
-static uint8_t s_beat_bpms[MAX_BEATS_IN_WINDOW];
+static uint16_t s_beat_intervals[MAX_BEATS_IN_WINDOW];
 static uint8_t s_beat_count = 0;
 
 static uint8_t s_last_valid_bpm = 0;
@@ -362,20 +367,22 @@ bool max30102_init(void)
 
     /*
      * FIFO Configuration:
-     * SMP_AVE = 000 (no averaging)
+     * SMP_AVE = 001 (2 samples averaged in hardware)
      * FIFO_ROLLOVER_EN = 1 (bit 4: rollover enabled)
      * FIFO_A_FULL = 0000
+     * Register value = 0x20 | 0x10 = 0x30
      */
-    max30102_write_reg(MAX30102_REG_FIFO_CONFIG, 0x10);
+    max30102_write_reg(MAX30102_REG_FIFO_CONFIG, 0x30);
 
     /*
      * SpO2 Configuration:
      * SPO2_ADC_RGE = 01 (4096 nA full scale, bit [6:5] = 01 -> 0x20)
-     * SPO2_SR = 000 (50 samples per second, bits [4:2] = 000 -> 0x00)
+     * SPO2_SR = 001 (100 samples per second, bits [4:2] = 001 -> 0x04)
      * LED_PW = 11 (411 us, 18-bit resolution, bits [1:0] = 11 -> 0x03)
-     * Total = 0x23
+     * With 100 Hz ADC sample rate and 2x hardware averaging, output FIFO rate is 50 Hz!
+     * Total = 0x20 | 0x04 | 0x03 = 0x27
      */
-    max30102_write_reg(MAX30102_REG_SPO2_CONFIG, 0x23);
+    max30102_write_reg(MAX30102_REG_SPO2_CONFIG, 0x27);
 
     /*
      * LED Pulse Amplitudes (~7.2 mA each)
@@ -487,7 +494,7 @@ static void max30102_process_sample(uint32_t red, uint32_t ir)
     s_finger_present = true;
 
     /*
-     * High-pass DC baseline removal (exponential moving average)
+     * High-pass DC baseline removal (exponential moving average: alpha ~ 0.97)
      */
     if (s_dc_filter == 0)
     {
@@ -495,21 +502,27 @@ static void max30102_process_sample(uint32_t red, uint32_t ir)
     }
     else
     {
-        s_dc_filter += (((int32_t)ir - s_dc_filter) >> 4);
+        s_dc_filter += (((int32_t)ir - s_dc_filter) >> 5);
     }
     int32_t ac = (int32_t)ir - s_dc_filter;
 
     /*
-     * Low-pass smoothing (3-point moving average)
+     * 5-point weighted triangular low-pass smoothing filter
+     * Weights: [1, 2, 4, 2, 1] / 10
      */
     s_lp_buf[s_lp_idx] = ac;
-    s_lp_idx = (s_lp_idx + 1) % 3;
-    int32_t filtered_ac = (s_lp_buf[0] + s_lp_buf[1] + s_lp_buf[2]) / 3;
+    s_lp_idx = (s_lp_idx + 1) % LP_FILTER_TAPS;
+
+    int32_t filtered_ac = (s_lp_buf[s_lp_idx] +
+                           2 * s_lp_buf[(s_lp_idx + 1) % 5] +
+                           4 * s_lp_buf[(s_lp_idx + 2) % 5] +
+                           2 * s_lp_buf[(s_lp_idx + 3) % 5] +
+                           s_lp_buf[(s_lp_idx + 4) % 5]) / 10;
 
     /*
-     * Wait for DC filter to settle (at least 20 samples = 400 ms)
+     * Allow filter to settle during the first 35 samples (~700 ms)
      */
-    if (s_sample_count < 20)
+    if (s_sample_count < 35)
     {
         s_prev2_sample = s_prev_sample;
         s_prev_sample = filtered_ac;
@@ -517,13 +530,42 @@ static void max30102_process_sample(uint32_t red, uint32_t ir)
     }
 
     /*
-     * Peak detection with refractory period:
-     *
-     * Sample rate = 50 Hz -> 20 ms per sample.
-     * Minimum interval = 15 samples (300 ms -> 200 BPM).
-     * Maximum interval = 75 samples (1500 ms -> 40 BPM).
+     * Adaptive dynamic threshold:
+     * Dicrotic notch / diastolic wave amplitude is typically <= 45% of systolic peak.
+     * We set the threshold to 60% of estimated systolic peak amplitude.
      */
-    if ((s_prev_sample > 25) &&
+    int32_t dyn_threshold = (s_peak_amplitude * 60) / 100;
+    if (dyn_threshold < 40)
+    {
+        dyn_threshold = 40;
+    }
+    if (dyn_threshold > 2500)
+    {
+        dyn_threshold = 2500;
+    }
+
+    /*
+     * Adaptive refractory period:
+     * A true heartbeat cannot occur sooner than 60% of the average beat interval.
+     * At 50 Hz, clamp between 20 samples (400 ms -> 150 BPM) and 45 samples (900 ms).
+     */
+    uint32_t refractory_samples = (s_avg_interval * 60) / 100;
+    if (refractory_samples < 20)
+    {
+        refractory_samples = 20;
+    }
+    if (refractory_samples > 45)
+    {
+        refractory_samples = 45;
+    }
+
+    /*
+     * Peak detection criteria:
+     * 1. Previous sample is a local maximum (prev > prev2 and prev >= current).
+     * 2. Previous sample exceeds dynamic threshold (strictly above dicrotic notch).
+     * 3. Time since last peak exceeds adaptive refractory period.
+     */
+    if ((s_prev_sample >= dyn_threshold) &&
         (s_prev_sample > s_prev2_sample) &&
         (s_prev_sample >= filtered_ac))
     {
@@ -531,18 +573,31 @@ static void max30102_process_sample(uint32_t red, uint32_t ir)
         {
             uint32_t interval = s_sample_count - s_last_peak_sample;
 
-            if (interval >= 15 && interval <= 75)
+            /*
+             * Accept valid interval between 40 BPM (75 samples) and 180 BPM (16 samples)
+             */
+            if ((interval >= refractory_samples) && (interval <= 75))
             {
-                uint8_t bpm = (uint8_t)((60 * 50) / interval);
-
-                if (bpm >= 45 && bpm <= 180)
+                if (s_beat_count < MAX_BEATS_IN_WINDOW)
                 {
-                    if (s_beat_count < MAX_BEATS_IN_WINDOW)
-                    {
-                        s_beat_bpms[s_beat_count++] = bpm;
-                    }
+                    s_beat_intervals[s_beat_count++] = (uint16_t)interval;
                 }
+
+                /*
+                 * Update running average interval
+                 */
+                s_avg_interval = (s_avg_interval * 3 + interval) / 4;
+
+                /*
+                 * Update running peak amplitude
+                 */
+                s_peak_amplitude = (s_peak_amplitude * 3 + s_prev_sample) / 4;
             }
+        }
+        else
+        {
+            /* First peak detected in this window */
+            s_peak_amplitude = (s_peak_amplitude * 3 + s_prev_sample) / 4;
         }
 
         s_last_peak_sample = s_sample_count;
@@ -571,9 +626,10 @@ void max30102_start_measurement(void)
     max30102_wakeup();
 
     s_dc_filter = 0;
-    s_lp_buf[0] = 0;
-    s_lp_buf[1] = 0;
-    s_lp_buf[2] = 0;
+    for (uint8_t i = 0; i < LP_FILTER_TAPS; i++)
+    {
+        s_lp_buf[i] = 0;
+    }
     s_lp_idx = 0;
     s_prev_sample = 0;
     s_prev2_sample = 0;
@@ -626,24 +682,134 @@ uint8_t max30102_finish_measurement(void)
     if (s_beat_count == 0)
     {
         /*
-         * Finger detected, but insufficient clean peaks in 3-second window
+         * Finger detected, but insufficient clean peaks in measurement window
          */
         return s_last_valid_bpm;
     }
 
     /*
-     * Average detected beats
+     * Calculate interval with outlier and noise rejection
      */
-    uint32_t sum = 0;
-    for (uint8_t i = 0; i < s_beat_count; i++)
+    uint32_t calc_interval = 0;
+
+    if (s_beat_count == 1)
     {
-        sum += s_beat_bpms[i];
+        calc_interval = s_beat_intervals[0];
+    }
+    else if (s_beat_count == 2)
+    {
+        calc_interval = (s_beat_intervals[0] + s_beat_intervals[1]) / 2;
+    }
+    else
+    {
+        /*
+         * 3 or more beat intervals: apply median and outlier rejection.
+         * Simple in-place insertion sort of intervals:
+         */
+        uint16_t sorted[MAX_BEATS_IN_WINDOW];
+        for (uint8_t i = 0; i < s_beat_count; i++)
+        {
+            sorted[i] = s_beat_intervals[i];
+        }
+
+        for (uint8_t i = 1; i < s_beat_count; i++)
+        {
+            uint16_t key = sorted[i];
+            int8_t j = (int8_t)i - 1;
+            while (j >= 0 && sorted[j] > key)
+            {
+                sorted[j + 1] = sorted[j];
+                j--;
+            }
+            sorted[j + 1] = key;
+        }
+
+        uint16_t median = sorted[s_beat_count / 2];
+
+        /*
+         * Average intervals that are within 25% of median (reject motion glitches)
+         */
+        uint32_t sum = 0;
+        uint8_t valid_cnt = 0;
+        uint16_t delta_max = (median * 25) / 100;
+
+        for (uint8_t i = 0; i < s_beat_count; i++)
+        {
+            uint16_t diff = (s_beat_intervals[i] > median) ?
+                            (s_beat_intervals[i] - median) :
+                            (median - s_beat_intervals[i]);
+
+            if (diff <= delta_max)
+            {
+                sum += s_beat_intervals[i];
+                valid_cnt++;
+            }
+        }
+
+        if (valid_cnt > 0)
+        {
+            calc_interval = sum / valid_cnt;
+        }
+        else
+        {
+            calc_interval = median;
+        }
     }
 
-    uint8_t final_bpm = (uint8_t)(sum / s_beat_count);
+    if (calc_interval == 0)
+    {
+        return s_last_valid_bpm;
+    }
 
-    if (final_bpm < 40) final_bpm = 40;
-    if (final_bpm > 200) final_bpm = 200;
+    uint8_t bpm = (uint8_t)(3000 / calc_interval);
+
+    /*
+     * Anti-Harmonic Double-Counting Filter:
+     * If the calculated BPM is high (>= 125 BPM) while the user's previous baseline
+     * is in the resting range (50 - 95 BPM), check if double-counting occurred:
+     */
+    if (bpm >= 125)
+    {
+        if (s_last_valid_bpm >= 50 && s_last_valid_bpm <= 95)
+        {
+            uint8_t half_bpm = bpm / 2;
+            int16_t diff = (int16_t)half_bpm - (int16_t)s_last_valid_bpm;
+            if (diff < 0) diff = -diff;
+            if (diff <= 18)
+            {
+                /* Harmonic confirmed -> correct to primary fundamental frequency */
+                bpm = half_bpm;
+            }
+        }
+    }
+
+    /*
+     * Exponential Moving Average (EMA) with previous valid reading:
+     * Provides smooth, natural heart rate transitions without erratic single-reading jumps
+     */
+    uint8_t final_bpm = bpm;
+    if (s_last_valid_bpm > 0)
+    {
+        int16_t step_diff = (int16_t)bpm - (int16_t)s_last_valid_bpm;
+        if (step_diff < 0) step_diff = -step_diff;
+
+        if (step_diff > 30)
+        {
+            /* Large sudden jump: apply dampening */
+            final_bpm = (uint8_t)((s_last_valid_bpm * 2 + bpm * 1) / 3);
+        }
+        else
+        {
+            /* Normal variance: smooth transition */
+            final_bpm = (uint8_t)((s_last_valid_bpm * 1 + bpm * 2) / 3);
+        }
+    }
+
+    /*
+     * Plausibility clamp for human heart rate
+     */
+    if (final_bpm < 45) final_bpm = 45;
+    if (final_bpm > 190) final_bpm = 190;
 
     s_last_valid_bpm = final_bpm;
     return final_bpm;

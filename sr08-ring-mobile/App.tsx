@@ -143,6 +143,27 @@ function decodeHeartRate(value: string): number | null {
   return null;
 }
 
+function sanitizeHeartRate(rawHr: number, prevHr: number | null): number {
+  if (rawHr <= 0) {
+    return 0;
+  }
+
+  /*
+   * Harmonic double-counting filter:
+   * If a pulse wave has a prominent dicrotic notch, the sensor can trigger twice per cardiac cycle.
+   * If the reading is >= 125 BPM while the baseline was resting (50 - 95 BPM), and halving it
+   * matches the resting baseline within 18 BPM, correct it back to the true fundamental rate.
+   */
+  if (prevHr !== null && prevHr >= 50 && prevHr <= 95 && rawHr >= 125) {
+    const half = Math.round(rawHr / 2);
+    if (Math.abs(half - prevHr) <= 18) {
+      return half;
+    }
+  }
+
+  return rawHr;
+}
+
 function getHeartRateStatus(
   value: number | null
 ): {
@@ -252,6 +273,7 @@ export default function App() {
   const heartRateSubscriptionRef = useRef<any>(null);
   const sensorSubscriptionRef = useRef<any>(null);
   const disconnectSubscriptionRef = useRef<any>(null);
+  const lastHrRef = useRef<number | null>(null);
 
   const styles = isDarkMode ? darkStyles : lightStyles;
 
@@ -293,6 +315,7 @@ export default function App() {
     heartRateSubscriptionRef.current = null;
     sensorSubscriptionRef.current = null;
     disconnectSubscriptionRef.current = null;
+    lastHrRef.current = null;
   };
 
   /*
@@ -669,9 +692,12 @@ export default function App() {
                     hr
                   );
 
-                  if (hr > 0) {
-                    setHeartRate(hr);
-                    recordHeartRate(hr);
+                  const filtered = sanitizeHeartRate(hr, lastHrRef.current);
+                  lastHrRef.current = filtered > 0 ? filtered : null;
+
+                  if (filtered > 0) {
+                    setHeartRate(filtered);
+                    recordHeartRate(filtered);
                   } else {
                     setHeartRate(null);
                   }
@@ -723,9 +749,12 @@ export default function App() {
                     );
 
                   if (hr !== null) {
-                    if (hr > 0) {
-                      setHeartRate(hr);
-                      recordHeartRate(hr);
+                    const filtered = sanitizeHeartRate(hr, lastHrRef.current);
+                    lastHrRef.current = filtered > 0 ? filtered : null;
+
+                    if (filtered > 0) {
+                      setHeartRate(filtered);
+                      recordHeartRate(filtered);
                     } else {
                       setHeartRate(null);
                     }

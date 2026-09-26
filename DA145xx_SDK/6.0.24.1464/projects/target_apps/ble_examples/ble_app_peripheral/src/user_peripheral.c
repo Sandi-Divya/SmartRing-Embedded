@@ -129,7 +129,7 @@ volatile uint32_t latency_test = 0;
 #define BATTERY_POLL_TIME             18000
 #define HR_POLL_TIME                  3000   /* 30 seconds (3000 * 10 ms) */
 #define HR_SAMPLE_STEP_TIME             10   /* 100 ms (10 * 10 ms) */
-#define HR_SAMPLE_TOTAL_TICKS           30   /* 30 ticks * 100 ms = 3.0 second measurement window */
+#define HR_SAMPLE_TOTAL_TICKS           40   /* 40 ticks * 100 ms = 4.0 second measurement window */
 
 
 /*
