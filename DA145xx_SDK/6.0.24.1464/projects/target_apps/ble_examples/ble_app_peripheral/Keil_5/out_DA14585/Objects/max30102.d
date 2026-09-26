@@ -1,4 +1,4 @@
-./out_da14585/objects/user_peripheral.o: ..\src\user_peripheral.c \
+./out_da14585/objects/max30102.o: ..\src\platform\max30102.c \
   ..\src\config\da1458x_config_basic.h \
   ..\src\config\da14585_config_basic.h \
   ..\..\..\..\..\sdk\common_project_files\da1458x_stack_config.h \
@@ -71,39 +71,11 @@
   ..\..\..\..\..\sdk\ble_stack\profiles\prf_types.h \
   ..\..\..\..\..\sdk\ble_stack\profiles\prf.h \
   ..\..\..\..\..\sdk\app_modules\api\app_adv_data.h \
-  ..\..\..\..\..\sdk\app_modules\api\app_api.h \
-  ..\..\..\..\..\sdk\ble_stack\host\gatt\gattm\gattm_task.h \
-  ..\..\..\..\..\sdk\ble_stack\host\gatt\gattm\gattm.h \
-  ..\..\..\..\..\sdk\app_modules\api\app_task.h \
-  ..\..\..\..\..\sdk\app_modules\api\app_entry_point.h \
-  ..\..\..\..\..\sdk\app_modules\api\app_callback.h \
-  ..\..\..\..\..\sdk\ble_stack\host\l2c\l2cc\l2cc_task.h \
-  ..\..\..\..\..\sdk\app_modules\api\app_easy_security.h \
-  ..\..\..\..\..\sdk\app_modules\api\app_mid.h \
-  ..\..\..\..\..\sdk\ble_stack\controller\llm\llm.h \
-  ..\..\..\..\..\sdk\platform\core_modules\common\api\co_math.h \
-  ..\..\..\..\..\sdk\platform\core_modules\common\api\co_buf.h \
-  ..\..\..\..\..\sdk\ble_stack\controller\llm\llm_task.h \
-  ..\..\..\..\..\sdk\platform\core_modules\rwip\api\rwip.h \
-  ..\..\..\..\..\sdk\ble_stack\ea\api\ea.h \
-  ..\..\..\..\..\sdk\ble_stack\profiles\custom\custs\api\custs1.h \
-  ..\..\..\..\..\sdk\ble_stack\host\att\attm\attm_db_128.h \
-  ..\..\..\..\..\sdk\ble_stack\profiles\custom\custom_common.h \
-  ..\..\..\..\..\sdk\ble_stack\profiles\custom\custs\api\custs1_task.h \
-  ..\src\custom_profile\user_custs1_def.h \
-  ..\src\config\user_periph_setup.h \
+  ..\src\config\max30102.h ..\src\config\user_periph_setup.h \
   ..\..\..\..\..\sdk\platform\driver\uart\uart.h \
   ..\..\..\..\..\sdk\platform\driver\dma\dma.h \
   ..\..\..\..\..\sdk\platform\driver\spi\spi.h \
   ..\..\..\..\..\sdk\platform\driver\spi\spi_58x.h \
   ..\..\..\..\..\sdk\platform\driver\spi_flash\spi_flash.h \
   ..\..\..\..\..\sdk\platform\driver\i2c\i2c.h \
-  ..\..\..\..\..\sdk\platform\driver\i2c_eeprom\i2c_eeprom.h \
-  ..\src\user_peripheral.h ..\..\..\..\..\sdk\platform\driver\adc\adc.h \
-  ..\..\..\..\..\sdk\platform\driver\adc\adc_58x.h \
-  ..\src\config\display.h \
-  ..\..\..\..\..\sdk\platform\driver\wkupct_quadec\wkupct_quadec.h \
-  ..\src\config\sleep_tracker.h ..\src\config\adxl362.h \
-  ..\src\config\max30102.h \
-  ..\..\..\..\..\sdk\platform\core_modules\ke\src\ke_env.h \
-  ..\..\..\..\..\sdk\platform\core_modules\ke\api\ke_event.h
+  ..\..\..\..\..\sdk\platform\driver\i2c_eeprom\i2c_eeprom.h

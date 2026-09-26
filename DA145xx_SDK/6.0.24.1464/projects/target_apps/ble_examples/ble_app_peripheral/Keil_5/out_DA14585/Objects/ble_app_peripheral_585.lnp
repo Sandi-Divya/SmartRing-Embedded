@@ -78,6 +78,7 @@
 ".\out_da14585\objects\display.o"
 ".\out_da14585\objects\sleep_tracker.o"
 ".\out_da14585\objects\adxl362.o"
+".\out_da14585\objects\max30102.o"
 ".\out_da14585\objects\user_custs1_impl.o"
 ".\out_da14585\objects\user_peripheral.o"
 --library_type=microlib --strict --scatter "..\..\..\..\..\sdk\common_project_files\scatterfiles\DA14585_586_armclang.sct"

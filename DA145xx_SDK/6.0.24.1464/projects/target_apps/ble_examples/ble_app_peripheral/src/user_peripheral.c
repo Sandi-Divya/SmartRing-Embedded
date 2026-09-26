@@ -84,6 +84,7 @@
 
 #include "sleep_tracker.h"
 #include "adxl362.h"
+#include "max30102.h"
 
 #include "ke_env.h"
 
@@ -126,7 +127,9 @@ volatile uint32_t latency_test = 0;
  */
 
 #define BATTERY_POLL_TIME             18000
-#define HR_POLL_TIME                  1500
+#define HR_POLL_TIME                  3000   /* 30 seconds (3000 * 10 ms) */
+#define HR_SAMPLE_STEP_TIME             10   /* 100 ms (10 * 10 ms) */
+#define HR_SAMPLE_TOTAL_TICKS           30   /* 30 ticks * 100 ms = 3.0 second measurement window */
 
 
 /*
@@ -221,11 +224,15 @@ static uint8_t last_sent_batt_lvl =
  ****************************************************************************************
  */
 
-uint8_t current_hr_value =
-    155;
+uint8_t current_hr_value = 0;
 
 timer_hnd app_hr_poll_timer =
     EASY_TIMER_INVALID_TIMER;
+
+static timer_hnd app_hr_sample_timer =
+    EASY_TIMER_INVALID_TIMER;
+
+static uint8_t hr_sample_ticks = 0;
 
 
 /*
@@ -329,6 +336,8 @@ static void stop_battery_polling(void);
 
 /* Heart rate */
 static void app_hr_poll_timer_cb(void);
+static void app_hr_sample_timer_cb(void);
+static void trigger_hr_measurement_now(void);
 static void start_hr_polling(void);
 static void stop_hr_polling(void);
 
@@ -816,42 +825,110 @@ void app_sensor_send_data_ntf(int16_t x, int16_t y, int16_t z)
 
 /*
  ****************************************************************************************
- * HEART RATE POLLING
+ * HEART RATE MEASUREMENT (MAX30102)
  ****************************************************************************************
  */
 
-static void app_hr_poll_timer_cb(void)
+static void app_hr_sample_timer_cb(void)
 {
-    if (app_connection_idx ==
-        GAP_INVALID_CONIDX)
-    {
-        app_hr_poll_timer =
-            EASY_TIMER_INVALID_TIMER;
+    SetWord16(WATCHDOG_REG, 0xFF);
 
-        return;
+    /*
+     * Poll MAX30102 FIFO and process PPG samples
+     */
+    max30102_poll_fifo();
+
+    hr_sample_ticks++;
+
+    if (hr_sample_ticks < HR_SAMPLE_TOTAL_TICKS)
+    {
+        /*
+         * Continue collecting samples in 100 ms intervals
+         */
+        app_hr_sample_timer = app_easy_timer(
+            HR_SAMPLE_STEP_TIME,
+            app_hr_sample_timer_cb
+        );
     }
-
-
-    current_hr_value =
-        155;
-
-
-    app_hr_send_telemetry_ntf(
-        current_hr_value
-    );
-
-
-    if (app_connection_idx !=
-        GAP_INVALID_CONIDX)
+    else
     {
-        app_hr_poll_timer =
-            app_easy_timer(
+        /*
+         * 3.0-second measurement session complete
+         */
+        app_hr_sample_timer = EASY_TIMER_INVALID_TIMER;
+
+        current_hr_value = max30102_finish_measurement();
+
+        /*
+         * Send telemetry notification to mobile app
+         */
+        app_hr_send_telemetry_ntf(current_hr_value);
+
+        /*
+         * If the ring OLED is currently on Heart Rate screen, update it live!
+         */
+        if (display_is_on && (display_sequence == DISPLAY_SEQUENCE_HR))
+        {
+            display_show_steps(current_hr_value);
+        }
+
+        /*
+         * Schedule next periodic measurement cycle
+         */
+        if (app_connection_idx != GAP_INVALID_CONIDX)
+        {
+            app_hr_poll_timer = app_easy_timer(
                 HR_POLL_TIME,
                 app_hr_poll_timer_cb
             );
+        }
     }
 }
 
+static void trigger_hr_measurement_now(void)
+{
+    if (app_hr_sample_timer != EASY_TIMER_INVALID_TIMER)
+    {
+        return; /* Already in progress */
+    }
+
+    max30102_start_measurement();
+    hr_sample_ticks = 0;
+
+    app_hr_sample_timer = app_easy_timer(
+        HR_SAMPLE_STEP_TIME,
+        app_hr_sample_timer_cb
+    );
+}
+
+static void app_hr_poll_timer_cb(void)
+{
+    if (app_connection_idx == GAP_INVALID_CONIDX)
+    {
+        app_hr_poll_timer = EASY_TIMER_INVALID_TIMER;
+        return;
+    }
+
+    /*
+     * Cancel any ongoing sample timer
+     */
+    if (app_hr_sample_timer != EASY_TIMER_INVALID_TIMER)
+    {
+        app_easy_timer_cancel(app_hr_sample_timer);
+        app_hr_sample_timer = EASY_TIMER_INVALID_TIMER;
+    }
+
+    /*
+     * Start MAX30102 3-second sampling session
+     */
+    max30102_start_measurement();
+    hr_sample_ticks = 0;
+
+    app_hr_sample_timer = app_easy_timer(
+        HR_SAMPLE_STEP_TIME,
+        app_hr_sample_timer_cb
+    );
+}
 
 /*
  ****************************************************************************************
@@ -863,19 +940,17 @@ static void start_hr_polling(void)
 {
     stop_hr_polling();
 
-
-    if (app_connection_idx ==
-        GAP_INVALID_CONIDX)
+    if (app_connection_idx == GAP_INVALID_CONIDX)
         return;
 
-
-    app_hr_poll_timer =
-        app_easy_timer(
-            HR_POLL_TIME,
-            app_hr_poll_timer_cb
-        );
+    /*
+     * Trigger first measurement shortly after BLE connection (1 second)
+     */
+    app_hr_poll_timer = app_easy_timer(
+        100,
+        app_hr_poll_timer_cb
+    );
 }
-
 
 /*
  ****************************************************************************************
@@ -885,16 +960,19 @@ static void start_hr_polling(void)
 
 static void stop_hr_polling(void)
 {
-    if (app_hr_poll_timer !=
-        EASY_TIMER_INVALID_TIMER)
+    if (app_hr_poll_timer != EASY_TIMER_INVALID_TIMER)
     {
-        app_easy_timer_cancel(
-            app_hr_poll_timer
-        );
-
-        app_hr_poll_timer =
-            EASY_TIMER_INVALID_TIMER;
+        app_easy_timer_cancel(app_hr_poll_timer);
+        app_hr_poll_timer = EASY_TIMER_INVALID_TIMER;
     }
+
+    if (app_hr_sample_timer != EASY_TIMER_INVALID_TIMER)
+    {
+        app_easy_timer_cancel(app_hr_sample_timer);
+        app_hr_sample_timer = EASY_TIMER_INVALID_TIMER;
+    }
+
+    max30102_shutdown();
 }
 
 
@@ -1397,9 +1475,10 @@ static void touch_release_timer_cb(void)
             current_hr_value
         );
 
-
         display_sequence =
             DISPLAY_SEQUENCE_HR;
+
+        trigger_hr_measurement_now();
     }
 
 
@@ -1994,6 +2073,9 @@ void user_app_init(void)
     app_hr_poll_timer =
         EASY_TIMER_INVALID_TIMER;
 
+    app_hr_sample_timer =
+        EASY_TIMER_INVALID_TIMER;
+
     app_param_update_request_timer =
         EASY_TIMER_INVALID_TIMER;
 
@@ -2024,7 +2106,7 @@ void user_app_init(void)
 
 
     current_hr_value =
-        155;
+        0;
 
 
     manual_clock_hour =
@@ -2079,6 +2161,15 @@ void user_app_init(void)
      */
 
     adxl362_init();
+
+
+    /*
+     ****************************************************************************************
+     * INITIALIZE MAX30102 HEART RATE SENSOR
+     ****************************************************************************************
+     */
+
+    max30102_init();
 
 
     /*

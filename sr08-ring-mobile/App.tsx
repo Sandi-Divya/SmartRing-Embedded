@@ -156,10 +156,10 @@ function getHeartRateStatus(
     | 'low'
     | 'veryLow';
 } {
-  if (value === null) {
+  if (value === null || value <= 0) {
     return {
       label: 'Waiting',
-      description: 'Waiting for heart rate data.',
+      description: 'Place your finger on the ring sensor to read heart rate.',
       level: 'normal',
     };
   }
@@ -669,8 +669,12 @@ export default function App() {
                     hr
                   );
 
-                  setHeartRate(hr);
-                  recordHeartRate(hr);
+                  if (hr > 0) {
+                    setHeartRate(hr);
+                    recordHeartRate(hr);
+                  } else {
+                    setHeartRate(null);
+                  }
                 }
               }
             } catch (error) {
@@ -719,8 +723,12 @@ export default function App() {
                     );
 
                   if (hr !== null) {
-                    setHeartRate(hr);
-                    recordHeartRate(hr);
+                    if (hr > 0) {
+                      setHeartRate(hr);
+                      recordHeartRate(hr);
+                    } else {
+                      setHeartRate(null);
+                    }
                   }
                 }
               );

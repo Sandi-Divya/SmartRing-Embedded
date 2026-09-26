@@ -743,30 +743,36 @@ void display_show_steps(
     uint16_t count
 )
 {
-    char count_str[8];
-
+    char count_str[16];
     uint8_t len = 0;
 
     /*
-     * Convert number to ASCII.
+     * Convert number to ASCII with BPM suffix.
      */
     if (count == 0)
     {
-        count_str[len++] = '0';
+        count_str[0] = '-';
+        count_str[1] = '-';
+        count_str[2] = ' ';
+        count_str[3] = 'B';
+        count_str[4] = 'P';
+        count_str[5] = 'M';
+        count_str[6] = '\0';
+        len = 6;
     }
     else
     {
         char temp[8];
-
         uint8_t temp_len = 0;
+        uint16_t val = count;
 
-        while ((count > 0) &&
+        while ((val > 0) &&
                (temp_len < sizeof(temp)))
         {
             temp[temp_len++] =
-                '0' + (count % 10);
+                '0' + (val % 10);
 
-            count /= 10;
+            val /= 10;
         }
 
         /*
@@ -777,9 +783,13 @@ void display_show_steps(
             count_str[len++] =
                 temp[--temp_len];
         }
-    }
 
-    count_str[len] = '\0';
+        count_str[len++] = ' ';
+        count_str[len++] = 'B';
+        count_str[len++] = 'P';
+        count_str[len++] = 'M';
+        count_str[len] = '\0';
+    }
 
     /*
      * Turn OLED ON.
@@ -789,16 +799,16 @@ void display_show_steps(
     display_clear();
 
     /*
-     * Heart Rate title.
+     * Heart Rate title (centered: 10 chars * 6 px = 60 px, (128 - 60) / 2 = 34).
      */
     display_draw_string(
         2,
-        25,
+        34,
         "Heart Rate"
     );
 
     /*
-     * Center heart-rate number.
+     * Center heart-rate number with BPM.
      */
     uint8_t num_px =
         (uint8_t)(len * 6);

@@ -1557,6 +1557,11 @@
               <FileType>1</FileType>
               <FilePath>..\src\platform\adxl362.c</FilePath>
             </File>
+            <File>
+              <FileName>max30102.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\platform\max30102.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -3127,6 +3132,11 @@
               <FileType>1</FileType>
               <FilePath>..\src\platform\adxl362.c</FilePath>
             </File>
+            <File>
+              <FileName>max30102.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\platform\max30102.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -4645,6 +4655,11 @@
               <FileName>adxl362.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\platform\adxl362.c</FilePath>
+            </File>
+            <File>
+              <FileName>max30102.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\platform\max30102.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -6165,6 +6180,11 @@
               <FileType>1</FileType>
               <FilePath>..\src\platform\adxl362.c</FilePath>
             </File>
+            <File>
+              <FileName>max30102.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\platform\max30102.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -7683,6 +7703,11 @@
               <FileName>adxl362.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\platform\adxl362.c</FilePath>
+            </File>
+            <File>
+              <FileName>max30102.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\platform\max30102.c</FilePath>
             </File>
           </Files>
         </Group>
